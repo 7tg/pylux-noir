@@ -189,7 +189,8 @@ class GpuVideoRenderer(
 				latch.countDown()
 			}
 		}
-		latch.await()
+		if(!latch.await(2, TimeUnit.SECONDS))
+			Log.e(TAG, "release(): render thread did not finish GL teardown within 2 s")
 		thread.quitSafely()
 	}
 

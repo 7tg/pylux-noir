@@ -26,9 +26,15 @@ ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *dec
 	return chiaki_mutex_init(&decoder->codec_mutex, false);
 }
 
+// Must be called WITHOUT codec_mutex held: it takes the (non-recursive) mutex itself.
 static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 {
 	chiaki_mutex_lock(&decoder->codec_mutex);
+	if(!decoder->codec)
+	{
+		chiaki_mutex_unlock(&decoder->codec_mutex);
+		return;
+	}
 	decoder->shutdown_output = true;
 	ssize_t codec_buf_index = AMediaCodec_dequeueInputBuffer(decoder->codec, 1000);
 	if(codec_buf_index >= 0)
@@ -45,9 +51,13 @@ static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 		AMediaCodec_stop(decoder->codec);
 		chiaki_mutex_unlock(&decoder->codec_mutex);
 	}
+	// The session thread may still be feeding video_sample(); clear the codec under the
+	// mutex so it cannot observe a deleted AMediaCodec.
+	chiaki_mutex_lock(&decoder->codec_mutex);
 	AMediaCodec_delete(decoder->codec);
 	decoder->codec = NULL;
 	decoder->shutdown_output = false;
+	chiaki_mutex_unlock(&decoder->codec_mutex);
 }
 
 void android_chiaki_video_decoder_fini(AndroidChiakiVideoDecoder *decoder)
@@ -63,7 +73,11 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 
 	if(!surface)
 	{
-		if(decoder->codec)
+		// kill_decoder() locks codec_mutex itself and the mutex is not recursive, so it
+		// must not be held here (and must not be leaked when there is no codec).
+		bool had_codec = decoder->codec != NULL;
+		chiaki_mutex_unlock(&decoder->codec_mutex);
+		if(had_codec)
 		{
 			kill_decoder(decoder);
 			CHIAKI_LOGI(decoder->log, "Decoder shut down after surface was removed");
