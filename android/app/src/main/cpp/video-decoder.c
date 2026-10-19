@@ -9,6 +9,20 @@
 #include <android/native_window_jni.h>
 
 #include <string.h>
+#include <time.h>
+
+/**
+ * Presentation timestamp for input buffers: CLOCK_MONOTONIC in microseconds, the same clock as
+ * System.nanoTime() and Choreographer on the Java side. MediaCodec carries it to the output
+ * buffer (SurfaceTexture.getTimestamp() returns it in nanoseconds), so a consumer can measure
+ * decoder-input-to-present latency. Monotonic, hence always non-decreasing as MediaCodec requires.
+ */
+static int64_t monotonic_us(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
 
 #define INPUT_BUFFER_TIMEOUT_MS 10
 
@@ -18,7 +32,6 @@ ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *dec
 {
 	decoder->log = log;
 	decoder->codec = NULL;
-	decoder->timestamp_cur = 0;
 	decoder->target_width = target_width;
 	decoder->target_height = target_height;
 	decoder->target_codec = codec;
@@ -40,7 +53,7 @@ static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 	if(codec_buf_index >= 0)
 	{
 		CHIAKI_LOGI(decoder->log, "Video Decoder sending EOS buffer");
-		AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index, 0, 0, decoder->timestamp_cur++, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
+		AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index, 0, 0, monotonic_us(), AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
 		AMediaCodec_stop(decoder->codec);
 		chiaki_mutex_unlock(&decoder->codec_mutex);
 	}
@@ -198,7 +211,7 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, in
 			codec_sample_size = codec_buf_size;
 		}
 		memcpy(codec_buf, buf, codec_sample_size);
-		media_status_t status = AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index, 0, codec_sample_size, decoder->timestamp_cur++, 0); // timestamp just raised by 1 for maximum realtime
+		media_status_t status = AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index, 0, codec_sample_size, monotonic_us(), 0);
 		if(status != AMEDIA_OK)
 		{
 			CHIAKI_LOGE(decoder->log, "AMediaCodec_queueInputBuffer() failed: %d", (int)status);

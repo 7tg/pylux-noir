@@ -70,9 +70,14 @@ class GpuVideoRenderer(
 		private const val MAX_CONFIGS = 16
 	}
 
-	/** [outputWidth]/[outputHeight] are the window surface size, 0 while no surface is attached. */
+	/**
+	 * [outputWidth]/[outputHeight] are the window surface size, 0 while no surface is attached.
+	 * [latencyMs] is the mean time from the decoder receiving a frame's data (native input
+	 * timestamp) to the vsync at which the GPU path renders it, over the last stats window;
+	 * 0 until the first real frame. Scanout adds one more vsync on top.
+	 */
 	data class Stats(val presentedFps: Double, val generatedFps: Double, val frameGenerationActive: Boolean, val upscalingActive: Boolean,
-		val outputWidth: Int, val outputHeight: Int)
+		val outputWidth: Int, val outputHeight: Int, val latencyMs: Double)
 
 	private val thread = HandlerThread("GpuVideoRenderer").also { it.start() }
 	private val handler = Handler(thread.looper)
@@ -118,6 +123,9 @@ class GpuVideoRenderer(
 	private var generatedInWindow = 0
 	@Volatile private var presentedFps = 0.0
 	@Volatile private var generatedFps = 0.0
+	private var latencySumNs = 0L
+	private var latencyCount = 0
+	@Volatile private var latencyMs = 0.0
 	private val loggedGlErrors = HashSet<String>()
 
 	private val vsyncCallback = object: Choreographer.FrameCallback
@@ -186,7 +194,7 @@ class GpuVideoRenderer(
 			Log.w(TAG, "render thread did not release the window surface within ${SURFACE_TEARDOWN_TIMEOUT_MS} ms")
 	}
 
-	fun stats(): Stats = Stats(presentedFps, generatedFps, frameGenerationActive, presentIsSgsr, windowWidth, windowHeight)
+	fun stats(): Stats = Stats(presentedFps, generatedFps, frameGenerationActive, presentIsSgsr, windowWidth, windowHeight, latencyMs)
 
 	/**
 	 * Stops presenting and frees all EGL/GL resources, blocking until the render thread is done.
@@ -405,10 +413,12 @@ class GpuVideoRenderer(
 					pacer.reset()
 					presentedFps = 0.0
 					generatedFps = 0.0
+					latencyMs = 0.0
 					stopped = true
 					return
 				}
 				st.getTransformMatrix(transform)
+				recordLatency(frameTimeNanos, st.timestamp)
 				newestSlot = 1 - newestSlot
 				copyOesToSlot(newestSlot)
 				present(ring[newestSlot])
@@ -468,6 +478,17 @@ class GpuVideoRenderer(
 		return true
 	}
 
+	/** [decoderTimestampNs] is the native input timestamp (CLOCK_MONOTONIC) MediaCodec carried through; 0 if unknown. */
+	private fun recordLatency(vsyncNs: Long, decoderTimestampNs: Long)
+	{
+		if(decoderTimestampNs <= 0L) return
+		val age = vsyncNs - decoderTimestampNs
+		// Ignore nonsense (clock mismatch or a decoder that rewrites timestamps) rather than skew the mean.
+		if(age < 0L || age > 1_000_000_000L) return
+		latencySumNs += age
+		latencyCount++
+	}
+
 	private fun updateStats(nowNs: Long)
 	{
 		if(windowStartNs == Long.MIN_VALUE)
@@ -480,8 +501,11 @@ class GpuVideoRenderer(
 		{
 			presentedFps = presentedInWindow * 1e9 / elapsed
 			generatedFps = generatedInWindow * 1e9 / elapsed
+			latencyMs = if(latencyCount > 0) latencySumNs / latencyCount / 1e6 else 0.0
 			presentedInWindow = 0
 			generatedInWindow = 0
+			latencySumNs = 0L
+			latencyCount = 0
 			windowStartNs = nowNs
 		}
 	}
