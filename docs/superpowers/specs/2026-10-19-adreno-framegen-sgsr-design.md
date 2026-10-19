@@ -129,8 +129,10 @@ fed by a 60 fps stream the steady state is real, generated, real, generated.
 
 Applied in `StreamActivity.onCreate` (and re-applied in `onResume`) when
 `frameGenerationEnabled || preferHighRefreshRate`. The window attribute is per-window, so
-leaving the activity restores the system default. The chosen refresh rate is logged with
-tag `GpuVideoRenderer`.
+leaving the activity restores the system default. The requested mode is logged with tag
+`DisplayMode`; the switch is asynchronous and may be refused (user peak-refresh setting,
+power saver), so the stats overlay shows the display's measured current refresh rate, not
+the requested one.
 
 ### Surface lifecycle on the GPU path
 
@@ -202,11 +204,12 @@ Unit (JUnit, no device):
   frames; never two generated in a row; no generation when last real frame is older than
   1.5 intervals; generation disabled flag; 30 fps interval.
 - `DisplayModeHelperTest`: mode selection picks same-size highest-rate mode and returns
-  null when none is better (uses fake `Display.Mode` data via a small interface).
+  null when none is better (uses a plain `DisplayModeInfo` data class, so no Android
+  types are needed on the JVM).
 
 On device (Tab S9, `./android/build-local.sh --quick --install` then `--logs-dump`):
-1. Logcat shows `GpuVideoRenderer: frame extrapolation supported=true` and the chosen
-   display mode `2560x1600 @ 120.0 Hz`.
+1. Logcat shows `GpuVideoRenderer: frame extrapolation supported=true` and
+   `DisplayMode: Requested 2560x1600 @ 120.0 Hz`.
 2. Stats overlay reads approximately `out 120 fps (gen 60)` during a 60 fps stream.
 3. Visual: upscaled image is sharper than the direct path; generated frames show no
    tearing or flashing; fast camera pans show at most mild warping.
