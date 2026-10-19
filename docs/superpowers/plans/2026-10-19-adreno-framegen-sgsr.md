@@ -114,27 +114,33 @@ In `AppIntegrityManager.validateAppState` (line 33) change the debug bypass to:
 
 - [ ] **Step 5: Create the keystore and local signing config (untracked)**
 
+`android/build-local.sh` rewrites `android/local.properties` on every run and only adds the
+`chiaki*` signing keys when it finds `secrets/android/release.jks` plus
+`secrets/android/credentials.env` (both gitignored via `.gitignore` lines 46-49). So the
+keystore and credentials go there, not into `local.properties` by hand.
+
 ```bash
+mkdir -p ~/keystores
 keytool -genkeypair -v -keystore ~/keystores/pylux-noir.jks -alias pylux-noir \
   -keyalg RSA -keysize 4096 -validity 10000 \
   -storepass pylux-noir-7tg -keypass pylux-noir-7tg \
   -dname "CN=pylux-noir, OU=7tg, O=7tg, L=Istanbul, C=TR"
-cat >> /home/neo/Projects/Personal/Pylux/android/local.properties <<'EOF'
-chiakiKeystore=/home/neo/keystores/pylux-noir.jks
-chiakiKeystorePW=pylux-noir-7tg
-chiakiKeyAlias=pylux-noir
-chiakiKeyPW=pylux-noir-7tg
+cp ~/keystores/pylux-noir.jks /home/neo/Projects/Personal/Pylux/secrets/android/release.jks
+cat > /home/neo/Projects/Personal/Pylux/secrets/android/credentials.env <<'EOF'
+ANDROID_KEYSTORE_PASSWORD=pylux-noir-7tg
+ANDROID_KEY_ALIAS=pylux-noir
+ANDROID_KEY_PASSWORD=pylux-noir-7tg
 EOF
-git -C /home/neo/Projects/Personal/Pylux status --short android/local.properties
+git -C /home/neo/Projects/Personal/Pylux status --short secrets
 ```
-Expected: `local.properties` is not listed (it is gitignored). Tell the user to back up the keystore.
+Expected: nothing listed (both files ignored). After the next build-script run, `android/local.properties` contains the four `chiaki*` keys and the APK is signed by `CN=pylux-noir` (check with `~/Android/Sdk/build-tools/35.0.0/apksigner verify --print-certs <apk>`). `~/keystores/pylux-noir.jks` is the backup copy; tell the user to back it up elsewhere too.
 
 - [ ] **Step 6: Build to confirm nothing broke**
 
 ```bash
 cd /home/neo/Projects/Personal/Pylux && ./android/build-local.sh --quick
 ```
-Expected: `BUILD SUCCESSFUL`, APK under `android/app/build/outputs/apk/debug/`.
+Expected: `BUILD SUCCESSFUL`; the script prints the APK path (with `--quick` it is under `android/app/build/intermediates/apk/debug/`).
 
 - [ ] **Step 7: Commit**
 
@@ -1585,10 +1591,11 @@ cd /home/neo/Projects/Personal/Pylux && git push -u origin noir
 - [ ] **Step 2: Build the signed release APK**
 
 ```bash
-cd /home/neo/Projects/Personal/Pylux/android && JAVA_HOME=~/.jdks/jdk-21.0.12.1+1 ./gradlew :app:assembleRelease
+cd /home/neo/Projects/Personal/Pylux && ./android/build-local.sh --quick >/dev/null   # refreshes local.properties signing keys from secrets/android/
+cd android && JAVA_HOME=~/.jdks/jdk-21.0.12.1+1 ./gradlew :app:assembleRelease
 ls -la app/build/outputs/apk/release/
 ```
-Expected: `app-release.apk` (signed by the local keystore because `local.properties` has `chiakiKeystore`). Verify:
+Expected: `app-release.apk` (signed by the noir keystore because `local.properties` has `chiakiKeystore`). Verify:
 ```bash
 ~/Android/Sdk/build-tools/35.0.0/apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk | head -3
 ```
