@@ -461,21 +461,33 @@ class SettingsFragment: PreferenceFragmentCompat(), TitleFragment
 		}
 	}
 
-	/** Summaries for the GPU tuning sliders show the real value the renderer will use, not the stored integer. */
+	/**
+	 * Summaries for the GPU tuning sliders show the real value the renderer will use, not the stored
+	 * integer. SeekBarPreference stores a dragged value without notifying, so a SummaryProvider would
+	 * go stale until the screen is rebuilt; instead the summary is set directly, once from the stored
+	 * value and again from each change listener (which runs before the new value is stored).
+	 */
 	private fun bindGpuTuningPreferences()
 	{
-		preferenceScreen.findPreference<SeekBarPreference>(getString(R.string.preferences_sgsr_sharpness_key))?.summaryProvider =
-			Preference.SummaryProvider<SeekBarPreference> { pref ->
-				getString(R.string.preferences_sgsr_sharpness_summary, String.format(Locale.US, "%.1f", pref.value / 10f))
-			}
-		preferenceScreen.findPreference<SeekBarPreference>(getString(R.string.preferences_sgsr_edge_threshold_key))?.summaryProvider =
-			Preference.SummaryProvider<SeekBarPreference> { pref ->
-				getString(R.string.preferences_sgsr_edge_threshold_summary, pref.value)
-			}
-		preferenceScreen.findPreference<SeekBarPreference>(getString(R.string.preferences_frame_generation_scale_key))?.summaryProvider =
-			Preference.SummaryProvider<SeekBarPreference> { pref ->
-				getString(R.string.preferences_frame_generation_scale_summary, String.format(Locale.US, "%.2f", pref.value / 100f))
-			}
+		bindGpuSlider(R.string.preferences_sgsr_sharpness_key) { value ->
+			getString(R.string.preferences_sgsr_sharpness_summary, String.format(Locale.US, "%.1f", value / 10f))
+		}
+		bindGpuSlider(R.string.preferences_sgsr_edge_threshold_key) { value ->
+			getString(R.string.preferences_sgsr_edge_threshold_summary, value)
+		}
+		bindGpuSlider(R.string.preferences_frame_generation_scale_key) { value ->
+			getString(R.string.preferences_frame_generation_scale_summary, String.format(Locale.US, "%.2f", value / 100f))
+		}
+	}
+
+	private fun bindGpuSlider(keyRes: Int, format: (Int) -> String)
+	{
+		val pref = preferenceScreen.findPreference<SeekBarPreference>(getString(keyRes)) ?: return
+		pref.summary = format(pref.value)
+		pref.setOnPreferenceChangeListener { _, newValue ->
+			pref.summary = format(newValue as Int)
+			true
+		}
 	}
 
 	private fun bindDpadTouchIncrementPreference(preference: SeekBarPreference?)
