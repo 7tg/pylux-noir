@@ -73,7 +73,8 @@ class FramePacerTest
 		val p = pacer()
 		p.decide(0L, true)
 		p.decide(interval60, true)
-		assertEquals(PaceDecision.PRESENT_REAL, p.decide(interval60 + vsync120, true))
+		// 13 ms after the last real frame: past the one-vsync hold window, still fresh enough to generate
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(interval60 + 13_000_000L, true))
 	}
 
 	@Test
@@ -136,5 +137,53 @@ class FramePacerTest
 		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(o + interval60 + vsync120, false))
 		assertEquals(PaceDecision.PRESENT_REAL, p.decide(o + 2 * interval60, true))
 		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(o + 2 * interval60 + vsync120, false))
+	}
+
+	@Test
+	fun earlyRealFrameIsHeldForOneVsync()
+	{
+		val p = pacer()
+		p.decide(0L, true)
+		p.decide(interval60, true)
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(interval60 + vsync120, true))
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(interval60 + 2 * vsync120, true))
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(interval60 + 3 * vsync120, false))
+	}
+
+	@Test
+	fun realFrameAfterTwoVsyncsIsPresentedImmediately()
+	{
+		val p = pacer()
+		p.decide(0L, true)
+		p.decide(interval60, true)
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(interval60 + vsync120, false))
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(2 * interval60, true))
+	}
+
+	@Test
+	fun holdDoesNotApplyBeforeTwoRealFrames()
+	{
+		val p = pacer()
+		p.decide(0L, true)
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(vsync120, true))
+	}
+
+	@Test
+	fun holdDoesNotApplyWhenGenerationDisabled()
+	{
+		val p = pacer(framegen = false)
+		p.decide(0L, true)
+		p.decide(interval60, true)
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(interval60 + vsync120, true))
+	}
+
+	@Test
+	fun noDoubleGenerationWhenHeldFrameArrives()
+	{
+		val p = pacer()
+		p.decide(0L, true)
+		p.decide(interval60, true)
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(interval60 + vsync120, true))
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(interval60 + 2 * vsync120, true))
 	}
 }
