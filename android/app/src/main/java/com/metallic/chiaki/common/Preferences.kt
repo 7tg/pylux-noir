@@ -193,6 +193,11 @@ class Preferences(context: Context)
 		get() = sharedPreferences.getInt(sgsrEdgeThresholdKey, SGSR_EDGE_THRESHOLD_DEFAULT).coerceIn(SGSR_EDGE_THRESHOLD_MIN, SGSR_EDGE_THRESHOLD_MAX)
 		set(value) { sharedPreferences.edit().putInt(sgsrEdgeThresholdKey, value.coerceIn(SGSR_EDGE_THRESHOLD_MIN, SGSR_EDGE_THRESHOLD_MAX)).apply() }
 
+	val sgsrEdgeDirectionKey get() = resources.getString(R.string.preferences_sgsr_edge_direction_key)
+	var sgsrEdgeDirection
+		get() = sharedPreferences.getBoolean(sgsrEdgeDirectionKey, true)
+		set(value) { sharedPreferences.edit().putBoolean(sgsrEdgeDirectionKey, value).apply() }
+
 	val frameGenerationScaleKey get() = resources.getString(R.string.preferences_frame_generation_scale_key)
 	var frameGenerationScale
 		get() = sharedPreferences.getInt(frameGenerationScaleKey, FRAME_GENERATION_SCALE_DEFAULT).coerceIn(FRAME_GENERATION_SCALE_MIN, FRAME_GENERATION_SCALE_MAX)

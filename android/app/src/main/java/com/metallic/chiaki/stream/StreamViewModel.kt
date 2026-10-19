@@ -24,6 +24,7 @@ class StreamViewModel(val application: Application, val connectInfo: ConnectInfo
 			tuning = GpuTuning(
 				sgsrEdgeSharpness = preferences.sgsrSharpness / 10f,
 				sgsrEdgeThreshold255 = preferences.sgsrEdgeThreshold,
+				sgsrEdgeDirection = preferences.sgsrEdgeDirection,
 				extrapolationScale = preferences.frameGenerationScale / 100f)))
 
 	private var _onScreenControlsEnabled = MutableLiveData<Boolean>(preferences.onScreenControlsEnabled)

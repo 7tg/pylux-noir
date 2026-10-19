@@ -79,8 +79,15 @@ void main()
 	private val SGSR1_PATCHES = listOf(
 		"#version 300 es" to "#version 310 es",
 		"layout(location=0) in highp vec4 in_TEXCOORD0;" to "in highp vec4 in_TEXCOORD0;",
-		"int mode = OperationMode;" to "const int mode = OperationMode;",
 		"highp vec2(" to "vec2(")
+
+	/** Only the original asset copies OperationMode into a variable; the edge-direction asset uses the define directly. */
+	private const val SGSR1_MODE_VARIABLE = "int mode = OperationMode;"
+	private const val SGSR1_EDGE_DIRECTION_OFF = "// #define UseEdgeDirection"
+
+	/** Upstream ships two mobile shaders; the edge-direction one is a newer file that also changes the base filter slightly. */
+	const val SGSR1_ASSET = "shaders/sgsr1_shader_mobile.frag"
+	const val SGSR1_EDGE_DIRECTION_ASSET = "shaders/sgsr1_shader_mobile_edge_direction.frag"
 
 	/** SGSR1 shader defaults, kept here so the settings UI and the patcher agree. */
 	const val SGSR1_DEFAULT_EDGE_SHARPNESS = 2.0f
@@ -93,16 +100,18 @@ void main()
 	 * 3. `int mode` becomes `const int mode`, because textureGather's component argument must be a compile-time constant.
 	 * 4. `highp vec2(` becomes `vec2(` (all occurrences), since a precision qualifier is not allowed on a constructor call.
 	 * 5. The `EdgeSharpness` and `EdgeThreshold` defines take [edgeSharpness] and [edgeThreshold255]/255.
+	 * 6. With [edgeDirection], the commented-out `UseEdgeDirection` define is enabled (edge-direction asset only).
 	 * Throws [ShaderCompileException] if the asset no longer contains one of the expected patterns.
 	 */
 	fun patchSgsr1Source(raw: String, edgeSharpness: Float = SGSR1_DEFAULT_EDGE_SHARPNESS,
-		edgeThreshold255: Int = SGSR1_DEFAULT_EDGE_THRESHOLD_255): String
+		edgeThreshold255: Int = SGSR1_DEFAULT_EDGE_THRESHOLD_255, edgeDirection: Boolean = false): String
 	{
 		val tuning = listOf(
 			"#define EdgeSharpness 2.0" to String.format(Locale.US, "#define EdgeSharpness %.2f", edgeSharpness),
 			"#define EdgeThreshold 8.0/255.0" to "#define EdgeThreshold $edgeThreshold255.0/255.0")
-		var result = raw
-		for((pattern, replacement) in SGSR1_PATCHES + tuning)
+		val edge = if(edgeDirection) listOf(SGSR1_EDGE_DIRECTION_OFF to "#define UseEdgeDirection") else emptyList()
+		var result = raw.replace(SGSR1_MODE_VARIABLE, "const $SGSR1_MODE_VARIABLE")
+		for((pattern, replacement) in SGSR1_PATCHES + tuning + edge)
 		{
 			if(!result.contains(pattern))
 				throw ShaderCompileException("SGSR1 asset missing expected pattern: $pattern")
@@ -111,10 +120,11 @@ void main()
 		return result
 	}
 
-	fun loadSgsr1Source(assets: AssetManager, edgeSharpness: Float, edgeThreshold255: Int): String
+	fun loadSgsr1Source(assets: AssetManager, edgeSharpness: Float, edgeThreshold255: Int, edgeDirection: Boolean): String
 	{
-		val raw = assets.open("shaders/sgsr1_shader_mobile.frag").bufferedReader().use { it.readText() }
-		return patchSgsr1Source(raw, edgeSharpness, edgeThreshold255)
+		val asset = if(edgeDirection) SGSR1_EDGE_DIRECTION_ASSET else SGSR1_ASSET
+		val raw = assets.open(asset).bufferedReader().use { it.readText() }
+		return patchSgsr1Source(raw, edgeSharpness, edgeThreshold255, edgeDirection)
 	}
 
 	/** [hdr] selects the explicit BT.2020 conversion; the caller must have checked GL_EXT_YUV_target. */
@@ -122,8 +132,9 @@ void main()
 		if(hdr) link(VERTEX_SRC, OES_COPY_HDR_FRAG_SRC, "oes-copy-hdr") else link(VERTEX_SRC, OES_COPY_FRAG_SRC, "oes-copy")
 	fun buildBlitProgram(): Int = link(VERTEX_SRC, BLIT_FRAG_SRC, "blit")
 	fun buildSgsr1Program(assets: AssetManager, edgeSharpness: Float = SGSR1_DEFAULT_EDGE_SHARPNESS,
-		edgeThreshold255: Int = SGSR1_DEFAULT_EDGE_THRESHOLD_255): Int =
-		link(VERTEX_SRC, loadSgsr1Source(assets, edgeSharpness, edgeThreshold255), "sgsr1")
+		edgeThreshold255: Int = SGSR1_DEFAULT_EDGE_THRESHOLD_255, edgeDirection: Boolean = false): Int =
+		link(VERTEX_SRC, loadSgsr1Source(assets, edgeSharpness, edgeThreshold255, edgeDirection),
+			if(edgeDirection) "sgsr1-edge-direction" else "sgsr1")
 
 	private fun compile(type: Int, src: String, name: String): Int
 	{

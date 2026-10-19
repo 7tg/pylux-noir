@@ -145,6 +145,13 @@
             app:icon="@drawable/ic_resolution"/>
 
         <SwitchPreference
+            app:key="@string/preferences_sgsr_edge_direction_key"
+            app:title="@string/preferences_sgsr_edge_direction_title"
+            app:summary="@string/preferences_sgsr_edge_direction_summary"
+            app:defaultValue="true"
+            app:icon="@drawable/ic_resolution"/>
+
+        <SwitchPreference
             app:key="@string/preferences_frame_generation_enabled_key"
             app:title="@string/preferences_frame_generation_enabled_title"
             app:summary="@string/preferences_frame_generation_enabled_summary"
