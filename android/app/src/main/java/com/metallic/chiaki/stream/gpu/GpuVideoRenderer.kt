@@ -329,11 +329,14 @@ class GpuVideoRenderer(
 	{
 		if(stopped) return
 		val st = surfaceTexture ?: return
-		val newFrame = frameAvailable.getAndSet(false)
+		// Peek only: the pacer may hold an early real frame for one vsync (PRESENT_GENERATED while a
+		// frame is pending), so the flag is cleared only when the frame is actually consumed.
+		val newFrame = frameAvailable.get()
 		when(pacer.decide(frameTimeNanos, newFrame))
 		{
 			PaceDecision.PRESENT_REAL ->
 			{
+				frameAvailable.set(false)
 				try
 				{
 					st.updateTexImage()
