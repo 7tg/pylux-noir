@@ -61,6 +61,7 @@ class GpuVideoRenderer(
 	@Volatile private var released = false
 	/** Set when decoding has ended (updateTexImage failed); no further GL work happens afterwards. */
 	@Volatile private var stopped = false
+	private var started = false
 
 	// EGL
 	private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
@@ -111,14 +112,16 @@ class GpuVideoRenderer(
 	{
 		check(Looper.myLooper() != thread.looper) { "start() must not be called from the render thread" }
 		check(!released) { "start() after release()" }
+		check(!started) { "start() called twice" }
+		started = true
 		var ok = false
 		val latch = CountDownLatch(1)
 		handler.post {
 			try
 			{
 				initGl()
-				ok = true
 				Choreographer.getInstance().postFrameCallback(vsyncCallback)
+				ok = true
 			}
 			catch(e: Throwable)
 			{
@@ -340,6 +343,8 @@ class GpuVideoRenderer(
 					// recorded this frame, so reset it rather than let a later vsync extrapolate from a stale pair.
 					Log.w(TAG, "updateTexImage failed, stopping GPU path: ${e.message}")
 					pacer.reset()
+					presentedFps = 0.0
+					generatedFps = 0.0
 					stopped = true
 					return
 				}
