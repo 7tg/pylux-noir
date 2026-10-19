@@ -37,4 +37,34 @@ class DisplayModeHelperTest
 		val m120b = m120.copy(id = 9, refreshRate = 120.0001f)
 		assertNull(DisplayModeHelper.pickHighestRefresh(m120, listOf(m120, m120b)))
 	}
+
+	@Test
+	fun tolerantOfNtscRates()
+	{
+		val ntsc = m60.copy(refreshRate = 59.94f)
+		assertNull(DisplayModeHelper.pickHighestRefresh(ntsc, listOf(ntsc, m60)))
+	}
+
+	@Test
+	fun boundaryAtHalfHertz()
+	{
+		val a = m60.copy(id = 5, refreshRate = 60.5f)
+		val b = m60.copy(id = 6, refreshRate = 60.6f)
+		assertNull(DisplayModeHelper.pickHighestRefresh(m60, listOf(m60, a)))
+		assertEquals(b, DisplayModeHelper.pickHighestRefresh(m60, listOf(m60, b)))
+	}
+
+	@Test
+	fun emptyListReturnsNull()
+	{
+		assertNull(DisplayModeHelper.pickHighestRefresh(m60, emptyList()))
+	}
+
+	@Test
+	fun tieKeepsFirstListed()
+	{
+		val first = m120.copy(id = 2)
+		val second = m120.copy(id = 7)
+		assertEquals(first, DisplayModeHelper.pickHighestRefresh(m60, listOf(m60, first, second)))
+	}
 }
