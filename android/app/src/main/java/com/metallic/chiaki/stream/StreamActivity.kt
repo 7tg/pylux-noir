@@ -538,7 +538,7 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 	}
 
 	/** Single compact top row with short labels, e.g.
-	 *  "4.7 Mbps • PL 1.1% • DF/s 0 • 60 FPS • 90 ms • 1280×720 • out 120 FPS (gen 60, SGSR) • 120 Hz". */
+	 *  "4.7 Mbps • PL 1.1% • DF/s 0 • 60 FPS • 90 ms • 1920×1080 → 2560×1440 • out 120 FPS (gen 60, SGSR) • 120 Hz". */
 	private fun formatStats(m: StreamMetrics, dropsPerTick: Long): String
 	{
 		val sep = "   •   "
@@ -549,8 +549,12 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 		parts.add(String.format(Locale.US, "%.0f FPS", m.fps))
 		if (m.rttMs > 0)
 			parts.add(String.format(Locale.US, "%.0f ms", m.rttMs))
-		parts.add("${m.width}×${m.height}")
-		viewModel.session.gpuStats?.let { g ->
+		val g = viewModel.session.gpuStats
+		if(g != null && g.outputWidth > 0 && g.outputHeight > 0)
+			parts.add("${m.width}×${m.height} → ${g.outputWidth}×${g.outputHeight}")
+		else
+			parts.add("${m.width}×${m.height}")
+		g?.let { g ->
 			parts.add(String.format(Locale.US, "out %.0f FPS (gen %.0f, %s)", g.presentedFps, g.generatedFps, if(g.upscalingActive) "SGSR" else "bilinear"))
 			parts.add(String.format(Locale.US, "%.0f Hz", DisplayModeHelper.currentRefreshRate(this)))
 		}
