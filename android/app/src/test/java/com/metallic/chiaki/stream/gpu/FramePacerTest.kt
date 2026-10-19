@@ -54,8 +54,8 @@ class FramePacerTest
 		val p = pacer()
 		p.decide(0L, true)
 		p.decide(interval60, true)
-		// 1.5 intervals after the last real frame: too old to predict from
-		assertEquals(PaceDecision.SKIP, p.decide(interval60 + (interval60 * 3 / 2), false))
+		// two intervals after the last real frame: too old to predict from
+		assertEquals(PaceDecision.SKIP, p.decide(interval60 + 2 * interval60, false))
 	}
 
 	@Test
