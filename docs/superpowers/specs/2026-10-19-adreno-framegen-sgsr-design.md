@@ -179,8 +179,24 @@ H264 on PS4). The console then sends HEVC Main10, BT.2020, PQ, which MediaCodec 
   `color-range` on the first output format change, so a console that answers in SDR is
   visible in the log. The stats overlay appends `HDR` to the stream resolution when the HDR
   codec is in effect.
-- Not done: HDR static metadata (SMPTE 2086 / CTA-861.3) on the GPU path's EGL surface; the
-  compositor uses its defaults for the layer.
+- HDR static metadata: the native decoder stores MediaFormat `hdr-static-info`, the renderer polls
+  it once per stats window and attaches it via `EGL_EXT_surface_SMPTE2086_metadata` /
+  `CTA861_3`. The PS5 sends an all-zero struct, which is treated as absent, so the compositor
+  uses its defaults on this console.
+
+### Interpolation mode and latency readout (added 2026-10-19)
+
+- Setting "Frame generation mode": Extrapolate (default) or Interpolate. Interpolate uses
+  `GL_QCOM_motion_estimation` (R8 luma inputs padded to the 8x8 search block, RGBA16F block motion
+  fields both ways) and a warp shader that blends the midpoint candidates from both fields,
+  weighting the pair that agrees better. `FramePacer` returns `PRESENT_INTERPOLATED` for a new frame
+  and `PRESENT_HELD_REAL` at the next vsync, so real frames are shown one vsync later than in
+  extrapolation mode. Falls back to extrapolation if the extension is missing; the setting is
+  disabled on such devices. Measured: 120 FPS (60 interpolated), GPU busy 81-84% vs 40% at the idle
+  clock, overlay latency ~22 ms vs ~12 ms.
+- Latency readout: input buffers carry CLOCK_MONOTONIC microseconds as PTS; the renderer averages
+  (render vsync - PTS) per stats window and the overlay shows it as `lat N ms`. The MediaCodec
+  `low-latency` / vendor / `priority` keys are set; on the Tab S9 they made no measurable difference.
 
 ## Failure handling
 
