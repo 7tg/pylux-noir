@@ -57,7 +57,7 @@ void main()
 
 	/**
 	 * Adapts the verbatim SGSR1 asset to GLSL ES 3.10 in memory:
-	 * 1. `#version 300 es` becomes `310 es`, since textureGather's non-constant-offset forms and our vertex shader need 3.10.
+	 * 1. `#version 300 es` becomes `310 es`, since textureGather only exists from GLSL ES 3.10 and our vertex shader is 3.10.
 	 * 2. The `layout(location=0)` qualifier on the input is dropped, as the vertex shader output has no location.
 	 * 3. `int mode` becomes `const int mode`, because textureGather's component argument must be a compile-time constant.
 	 * 4. `highp vec2(` becomes `vec2(` (all occurrences), since a precision qualifier is not allowed on a constructor call.
