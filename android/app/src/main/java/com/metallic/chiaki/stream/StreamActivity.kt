@@ -94,6 +94,17 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 	/** [SystemClock.elapsedRealtime] when this session entered [StreamStateConnected]; 0 if not connected. */
 	private var connectedAtElapsedRealtime: Long = 0L
 
+	/** Refresh rate the window asked for (the switch is asynchronous and may be refused). */
+	private var requestedRefreshRate = 60f
+
+	private fun wantsHighRefresh() = viewModel.preferences.preferHighRefresh || viewModel.preferences.frameGenerationEnabled
+
+	private fun applyDisplayModePreference()
+	{
+		if(!wantsHighRefresh()) return
+		requestedRefreshRate = DisplayModeHelper.applyHighestRefresh(this)
+	}
+
 	override fun onCreate(savedInstanceState: Bundle?)
 	{
 		super.onCreate(savedInstanceState)
@@ -115,6 +126,16 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 
 		binding = ActivityStreamBinding.inflate(layoutInflater)
 		setContentView(binding.root)
+		applyDisplayModePreference()
+		binding.surfaceView.holder.addCallback(object: SurfaceHolder.Callback {
+			override fun surfaceCreated(holder: SurfaceHolder) {}
+			override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int)
+			{
+				if(wantsHighRefresh())
+					DisplayModeHelper.hintSurfaceFrameRate(holder.surface, requestedRefreshRate)
+			}
+			override fun surfaceDestroyed(holder: SurfaceHolder) {}
+		})
 		window.decorView.setOnSystemUiVisibilityChangeListener(this)
 
 		viewModel.onScreenControlsEnabled.observe(this, Observer {
@@ -264,6 +285,7 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 		activityStopped = false
 		Log.i("StreamActivity", "onResume: pip=$isInPictureInPictureMode session=${viewModel.session.session != null}")
 		hideSystemUI()
+		applyDisplayModePreference()
 		// resume() is safe to call even if session is already running -
 		// it returns immediately when session != null
 		viewModel.session.resume()
@@ -527,6 +549,10 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 		if (m.rttMs > 0)
 			parts.add(String.format(Locale.US, "%.0f ms", m.rttMs))
 		parts.add("${m.width}×${m.height}")
+		viewModel.session.gpuStats?.let { g ->
+			parts.add(String.format(Locale.US, "out %.0f fps (gen %.0f)", g.presentedFps, g.generatedFps))
+			parts.add(String.format(Locale.US, "%.0f Hz", DisplayModeHelper.currentRefreshRate(this)))
+		}
 		return parts.joinToString(sep)
 	}
 
