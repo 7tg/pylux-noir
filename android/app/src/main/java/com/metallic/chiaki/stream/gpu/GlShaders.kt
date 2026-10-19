@@ -3,16 +3,16 @@
 package com.metallic.chiaki.stream.gpu
 
 import android.content.res.AssetManager
-import android.opengl.GLES20
 import android.opengl.GLES31
 
+/** Thrown for shader compile failures, program link failures and an unexpected SGSR1 asset. */
 class ShaderCompileException(message: String): RuntimeException(message)
 
 /** Compiles the programs used by [GpuVideoRenderer]. Call on the render thread with a GLES 3.1 context current. */
 object GlShaders
 {
 	/** Full-screen triangle from gl_VertexID; no vertex buffers needed. Output name matches SGSR1's input. */
-	private const val VERTEX_SRC = """#version 310 es
+	internal const val VERTEX_SRC = """#version 310 es
 out highp vec4 in_TEXCOORD0;
 void main()
 {
@@ -23,11 +23,11 @@ void main()
 """
 
 	/** Copies the decoder's external texture into a plain RGBA8 texture, honouring the SurfaceTexture transform. */
-	private const val OES_COPY_FRAG_SRC = """#version 310 es
+	internal const val OES_COPY_FRAG_SRC = """#version 310 es
 #extension GL_OES_EGL_image_external_essl3 : require
 precision mediump float;
 uniform samplerExternalOES uTex;
-uniform mat4 uTransform;
+uniform highp mat4 uTransform;
 in highp vec4 in_TEXCOORD0;
 out vec4 fragColor;
 void main()
@@ -38,9 +38,9 @@ void main()
 """
 
 	/** Bilinear blit used when SGSR upscaling is off. Uniform name matches SGSR1 so the renderer treats both alike. */
-	private const val BLIT_FRAG_SRC = """#version 310 es
+	internal const val BLIT_FRAG_SRC = """#version 310 es
 precision mediump float;
-uniform sampler2D ps0;
+uniform mediump sampler2D ps0;
 in highp vec4 in_TEXCOORD0;
 out vec4 fragColor;
 void main()
@@ -49,10 +49,31 @@ void main()
 }
 """
 
-	/** The vendored shader targets ES 3.00 with an explicit input location; textureGather needs 3.10 and the vertex shader has no location. */
-	fun patchSgsr1Source(raw: String): String = raw
-		.replaceFirst("#version 300 es", "#version 310 es")
-		.replaceFirst("layout(location=0) in highp vec4 in_TEXCOORD0;", "in highp vec4 in_TEXCOORD0;")
+	private val SGSR1_PATCHES = listOf(
+		"#version 300 es" to "#version 310 es",
+		"layout(location=0) in highp vec4 in_TEXCOORD0;" to "in highp vec4 in_TEXCOORD0;",
+		"int mode = OperationMode;" to "const int mode = OperationMode;",
+		"highp vec2(" to "vec2(")
+
+	/**
+	 * Adapts the verbatim SGSR1 asset to GLSL ES 3.10 in memory:
+	 * 1. `#version 300 es` becomes `310 es`, since textureGather's non-constant-offset forms and our vertex shader need 3.10.
+	 * 2. The `layout(location=0)` qualifier on the input is dropped, as the vertex shader output has no location.
+	 * 3. `int mode` becomes `const int mode`, because textureGather's component argument must be a compile-time constant.
+	 * 4. `highp vec2(` becomes `vec2(` (all occurrences), since a precision qualifier is not allowed on a constructor call.
+	 * Throws [ShaderCompileException] if the asset no longer contains one of the expected patterns.
+	 */
+	fun patchSgsr1Source(raw: String): String
+	{
+		var result = raw
+		for((pattern, replacement) in SGSR1_PATCHES)
+		{
+			if(!result.contains(pattern))
+				throw ShaderCompileException("SGSR1 asset missing expected pattern: $pattern")
+			result = result.replace(pattern, replacement)
+		}
+		return result
+	}
 
 	fun loadSgsr1Source(assets: AssetManager): String
 	{
@@ -92,7 +113,7 @@ void main()
 		GLES31.glDeleteShader(vs)
 		GLES31.glDeleteShader(fs)
 		val status = IntArray(1)
-		GLES31.glGetProgramiv(program, GLES20.GL_LINK_STATUS, status, 0)
+		GLES31.glGetProgramiv(program, GLES31.GL_LINK_STATUS, status, 0)
 		if(status[0] == 0)
 		{
 			val log = GLES31.glGetProgramInfoLog(program)
