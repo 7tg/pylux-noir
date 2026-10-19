@@ -16,7 +16,7 @@ class FramePacerTest
 	fun realFrameAlwaysPresented()
 	{
 		val p = pacer()
-		assertEquals(PaceDecision.PRESENT_REAL, p.decide(0L, newFrameAvailable = true))
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(0L, true))
 	}
 
 	@Test
@@ -84,6 +84,10 @@ class FramePacerTest
 		p.decide(interval60, true)
 		p.reset()
 		assertEquals(PaceDecision.SKIP, p.decide(interval60 + vsync120, false))
+		p.decide(3 * interval60, true)
+		assertEquals(PaceDecision.SKIP, p.decide(3 * interval60 + vsync120, false))
+		p.decide(4 * interval60, true)
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(4 * interval60 + vsync120, false))
 	}
 
 	@Test
@@ -95,5 +99,42 @@ class FramePacerTest
 		p.decide(interval30, true)
 		// 25 ms after the last real frame is still < 1.5 * 33 ms
 		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(interval30 + 25_000_000L, false))
+	}
+
+	@Test
+	fun noGenerationFromStalePairAfterStall()
+	{
+		val p = pacer()
+		p.decide(0L, true)
+		p.decide(interval60, true)
+		p.decide(2_000_000_000L, true)
+		assertEquals(PaceDecision.SKIP, p.decide(2_000_000_000L + vsync120, false))
+		p.decide(2_000_000_000L + interval60, true)
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(2_000_000_000L + interval60 + vsync120, false))
+	}
+
+	@Test
+	fun flagFlippedAfterConstructionTakesEffect()
+	{
+		val p = pacer(framegen = false)
+		p.decide(0L, true)
+		p.decide(interval60, true)
+		p.frameGenerationEnabled = true
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(interval60 + vsync120, false))
+		p.decide(2 * interval60, true)
+		p.frameGenerationEnabled = false
+		assertEquals(PaceDecision.SKIP, p.decide(2 * interval60 + vsync120, false))
+	}
+
+	@Test
+	fun negativeTimestampsWork()
+	{
+		val o = -5_000_000_000L
+		val p = pacer()
+		p.decide(o, true)
+		p.decide(o + interval60, true)
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(o + interval60 + vsync120, false))
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(o + 2 * interval60, true))
+		assertEquals(PaceDecision.PRESENT_GENERATED, p.decide(o + 2 * interval60 + vsync120, false))
 	}
 }

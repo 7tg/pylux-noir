@@ -14,6 +14,11 @@ enum class PaceDecision { PRESENT_REAL, PRESENT_GENERATED, SKIP }
  *    have been seen, the previously presented frame was real, and the last real frame
  *    is younger than [MAX_REAL_AGE_INTERVALS] stream intervals.
  * 3. Otherwise skip (leave the last frame on screen).
+ *
+ * [decide] and [reset] must be called from the render thread only (their state is not
+ * volatile); only [frameGenerationEnabled] may be set from another thread. [reset] leaves
+ * [frameGenerationEnabled] untouched. The recorded real-frame time is the vsync at which the
+ * frame was consumed (up to one vsync later than its arrival), which the 1.5-interval margin absorbs.
  */
 class FramePacer(private val streamIntervalNs: Long, @Volatile var frameGenerationEnabled: Boolean)
 {
@@ -22,8 +27,10 @@ class FramePacer(private val streamIntervalNs: Long, @Volatile var frameGenerati
 		const val MAX_REAL_AGE_INTERVALS = 1.5
 	}
 
+	/** Consecutive real frames since the last reset or stall; exposed for stats/debugging. */
 	var realFramesSeen = 0L
 		private set
+	private val maxRealAgeNs = (streamIntervalNs * MAX_REAL_AGE_INTERVALS).toLong()
 	private var lastRealNs = Long.MIN_VALUE
 	private var lastPresentedWasGenerated = false
 
@@ -31,13 +38,16 @@ class FramePacer(private val streamIntervalNs: Long, @Volatile var frameGenerati
 	{
 		if(newFrameAvailable)
 		{
-			realFramesSeen++
+			if(lastRealNs != Long.MIN_VALUE && nowNs - lastRealNs >= maxRealAgeNs)
+				realFramesSeen = 1 // stall: the previous pair is too old to extrapolate from
+			else
+				realFramesSeen++
 			lastRealNs = nowNs
 			lastPresentedWasGenerated = false
 			return PaceDecision.PRESENT_REAL
 		}
 		val fresh = lastRealNs != Long.MIN_VALUE
-			&& (nowNs - lastRealNs) < (streamIntervalNs * MAX_REAL_AGE_INTERVALS).toLong()
+			&& (nowNs - lastRealNs) < maxRealAgeNs
 		if(frameGenerationEnabled && realFramesSeen >= 2 && !lastPresentedWasGenerated && fresh)
 		{
 			lastPresentedWasGenerated = true
@@ -48,7 +58,7 @@ class FramePacer(private val streamIntervalNs: Long, @Volatile var frameGenerati
 
 	fun reset()
 	{
-		realFramesSeen = 0
+		realFramesSeen = 0L
 		lastRealNs = Long.MIN_VALUE
 		lastPresentedWasGenerated = false
 	}
