@@ -41,6 +41,9 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 		preferences.dpadTouchEnabledKey -> preferences.dpadTouchEnabled
 		preferences.rumbleEnabledKey -> preferences.rumbleEnabled
 		preferences.buttonHapticEnabledKey -> preferences.buttonHapticEnabled
+		preferences.gpuUpscalingEnabledKey -> preferences.gpuUpscalingEnabled
+		preferences.frameGenerationEnabledKey -> preferences.frameGenerationEnabled
+		preferences.preferHighRefreshKey -> preferences.preferHighRefresh
 		else -> defValue
 	}
 
@@ -54,6 +57,9 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 			preferences.dpadTouchEnabledKey -> preferences.dpadTouchEnabled = value
 			preferences.rumbleEnabledKey -> preferences.rumbleEnabled = value
 			preferences.buttonHapticEnabledKey -> preferences.buttonHapticEnabled = value
+			preferences.gpuUpscalingEnabledKey -> preferences.gpuUpscalingEnabled = value
+			preferences.frameGenerationEnabledKey -> preferences.frameGenerationEnabled = value
+			preferences.preferHighRefreshKey -> preferences.preferHighRefresh = value
 		}
 	}
 

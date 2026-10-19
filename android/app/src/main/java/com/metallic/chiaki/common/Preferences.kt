@@ -155,6 +155,21 @@ class Preferences(context: Context)
 		get() = sharedPreferences.getBoolean(pipEnabledKey, true)
 		set(value) { sharedPreferences.edit().putBoolean(pipEnabledKey, value).apply() }
 
+	val gpuUpscalingEnabledKey get() = resources.getString(R.string.preferences_gpu_upscaling_enabled_key)
+	var gpuUpscalingEnabled
+		get() = sharedPreferences.getBoolean(gpuUpscalingEnabledKey, true)
+		set(value) { sharedPreferences.edit().putBoolean(gpuUpscalingEnabledKey, value).apply() }
+
+	val frameGenerationEnabledKey get() = resources.getString(R.string.preferences_frame_generation_enabled_key)
+	var frameGenerationEnabled
+		get() = sharedPreferences.getBoolean(frameGenerationEnabledKey, true)
+		set(value) { sharedPreferences.edit().putBoolean(frameGenerationEnabledKey, value).apply() }
+
+	val preferHighRefreshKey get() = resources.getString(R.string.preferences_prefer_high_refresh_key)
+	var preferHighRefresh
+		get() = sharedPreferences.getBoolean(preferHighRefreshKey, true)
+		set(value) { sharedPreferences.edit().putBoolean(preferHighRefreshKey, value).apply() }
+
 	/** Whether the in-stream performance stats overlay is toggled on (per-session UI state). */
 	private val STREAM_STATS_OVERLAY_KEY = "stream_stats_overlay_enabled"
 	var streamStatsOverlayEnabled

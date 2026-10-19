@@ -116,6 +116,27 @@
             app:title="@string/preferences_codec_title"
             app:summary="%s"
             app:icon="@drawable/ic_codec"/>
+
+        <SwitchPreference
+            app:key="@string/preferences_gpu_upscaling_enabled_key"
+            app:title="@string/preferences_gpu_upscaling_enabled_title"
+            app:summary="@string/preferences_gpu_upscaling_enabled_summary"
+            app:defaultValue="true"
+            app:icon="@drawable/ic_resolution"/>
+
+        <SwitchPreference
+            app:key="@string/preferences_frame_generation_enabled_key"
+            app:title="@string/preferences_frame_generation_enabled_title"
+            app:summary="@string/preferences_frame_generation_enabled_summary"
+            app:defaultValue="true"
+            app:icon="@drawable/ic_fps"/>
+
+        <SwitchPreference
+            app:key="@string/preferences_prefer_high_refresh_key"
+            app:title="@string/preferences_prefer_high_refresh_title"
+            app:summary="@string/preferences_prefer_high_refresh_summary"
+            app:defaultValue="true"
+            app:icon="@drawable/ic_fps"/>
     </PreferenceCategory>
 
     <PreferenceCategory
