@@ -11,6 +11,80 @@ class FramePacerTest
 	private val vsync120 = 8_333_333L
 
 	private fun pacer(framegen: Boolean = true) = FramePacer(interval60, framegen)
+	private fun interp(framegen: Boolean = true) = FramePacer(interval60, framegen, GenerationMode.INTERPOLATE)
+
+	@Test
+	fun interpolateFirstFrameIsPresentedDirectly()
+	{
+		val p = interp()
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(0L, true))
+		assertEquals(PaceDecision.SKIP, p.decide(vsync120, false))
+	}
+
+	@Test
+	fun interpolateSteadyStateAlternatesInterpolatedAndHeldReal()
+	{
+		val p = interp()
+		p.decide(0L, true)
+		assertEquals(PaceDecision.PRESENT_INTERPOLATED, p.decide(interval60, true))
+		assertEquals(PaceDecision.PRESENT_HELD_REAL, p.decide(interval60 + vsync120, false))
+		assertEquals(PaceDecision.PRESENT_INTERPOLATED, p.decide(2 * interval60, true))
+		assertEquals(PaceDecision.PRESENT_HELD_REAL, p.decide(2 * interval60 + vsync120, false))
+		assertEquals(PaceDecision.SKIP, p.decide(2 * interval60 + 2 * vsync120, false))
+	}
+
+	@Test
+	fun interpolateHeldFrameIsShownBeforeANewerOneIsConsumed()
+	{
+		val p = interp()
+		p.decide(0L, true)
+		assertEquals(PaceDecision.PRESENT_INTERPOLATED, p.decide(interval60, true))
+		// the next frame is already there: show the held one first, the delay never exceeds one vsync
+		assertEquals(PaceDecision.PRESENT_HELD_REAL, p.decide(interval60 + vsync120, true))
+		assertEquals(PaceDecision.PRESENT_INTERPOLATED, p.decide(interval60 + 2 * vsync120, true))
+	}
+
+	@Test
+	fun interpolateAfterStallPresentsDirectlyThenResumes()
+	{
+		val p = interp()
+		p.decide(0L, true)
+		p.decide(interval60, true)
+		p.decide(interval60 + vsync120, false)
+		val late = interval60 + 3 * interval60
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(late, true))
+		assertEquals(PaceDecision.PRESENT_INTERPOLATED, p.decide(late + interval60, true))
+	}
+
+	@Test
+	fun interpolateModeWithGenerationDisabledBehavesLikePlainPresentation()
+	{
+		val p = interp(framegen = false)
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(0L, true))
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(interval60, true))
+		assertEquals(PaceDecision.SKIP, p.decide(interval60 + vsync120, false))
+	}
+
+	@Test
+	fun switchingToExtrapolateStillShowsTheHeldFrame()
+	{
+		val p = interp()
+		p.decide(0L, true)
+		assertEquals(PaceDecision.PRESENT_INTERPOLATED, p.decide(interval60, true))
+		p.generationMode = GenerationMode.EXTRAPOLATE
+		assertEquals(PaceDecision.PRESENT_HELD_REAL, p.decide(interval60 + vsync120, false))
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(2 * interval60, true))
+	}
+
+	@Test
+	fun resetClearsHeldFrame()
+	{
+		val p = interp()
+		p.decide(0L, true)
+		p.decide(interval60, true)
+		p.reset()
+		assertEquals(PaceDecision.PRESENT_REAL, p.decide(2 * interval60, true))
+	}
 
 	@Test
 	fun realFrameAlwaysPresented()

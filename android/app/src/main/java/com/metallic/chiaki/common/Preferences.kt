@@ -36,6 +36,12 @@ class Preferences(context: Context)
 		FPS_60("60", R.string.preferences_fps_title_60, VideoFPSPreset.FPS_60)
 	}
 
+	enum class FrameGenerationMode(val value: String, @StringRes val title: Int, val mode: com.metallic.chiaki.stream.gpu.GenerationMode)
+	{
+		EXTRAPOLATE("extrapolate", R.string.preferences_frame_generation_mode_title_extrapolate, com.metallic.chiaki.stream.gpu.GenerationMode.EXTRAPOLATE),
+		INTERPOLATE("interpolate", R.string.preferences_frame_generation_mode_title_interpolate, com.metallic.chiaki.stream.gpu.GenerationMode.INTERPOLATE)
+	}
+
 	enum class Codec(val value: String, @StringRes val title: Int, val codec: com.metallic.chiaki.lib.Codec)
 	{
 		CODEC_H264("h264", R.string.preferences_codec_title_h264, com.metallic.chiaki.lib.Codec.CODEC_H264),
@@ -51,6 +57,8 @@ class Preferences(context: Context)
 		val fpsAll = FPS.values()
 		val codecDefault = Codec.CODEC_H265
 		val codecAll = Codec.values()
+		val frameGenerationModeDefault = FrameGenerationMode.EXTRAPOLATE
+		val frameGenerationModeAll = FrameGenerationMode.values()
 
 		const val CLOUD_BITRATE_MIN_KBPS = 2000
 		const val CLOUD_BITRATE_MAX_KBPS = 200000
@@ -192,6 +200,13 @@ class Preferences(context: Context)
 	var sgsrEdgeThreshold
 		get() = sharedPreferences.getInt(sgsrEdgeThresholdKey, SGSR_EDGE_THRESHOLD_DEFAULT).coerceIn(SGSR_EDGE_THRESHOLD_MIN, SGSR_EDGE_THRESHOLD_MAX)
 		set(value) { sharedPreferences.edit().putInt(sgsrEdgeThresholdKey, value.coerceIn(SGSR_EDGE_THRESHOLD_MIN, SGSR_EDGE_THRESHOLD_MAX)).apply() }
+
+	val frameGenerationModeKey get() = resources.getString(R.string.preferences_frame_generation_mode_key)
+	var frameGenerationMode
+		get() = sharedPreferences.getString(frameGenerationModeKey, frameGenerationModeDefault.value)?.let { value ->
+			FrameGenerationMode.values().firstOrNull { it.value == value }
+		} ?: frameGenerationModeDefault
+		set(value) { sharedPreferences.edit().putString(frameGenerationModeKey, value.value).apply() }
 
 	val sgsrEdgeDirectionKey get() = resources.getString(R.string.preferences_sgsr_edge_direction_key)
 	var sgsrEdgeDirection

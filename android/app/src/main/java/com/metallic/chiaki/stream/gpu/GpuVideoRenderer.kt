@@ -31,7 +31,8 @@ data class GpuTuning(
 	val sgsrEdgeSharpness: Float = GlShaders.SGSR1_DEFAULT_EDGE_SHARPNESS,
 	val sgsrEdgeThreshold255: Int = GlShaders.SGSR1_DEFAULT_EDGE_THRESHOLD_255,
 	val sgsrEdgeDirection: Boolean = true,
-	val extrapolationScale: Float = 0.5f)
+	val extrapolationScale: Float = 0.5f,
+	val generationMode: GenerationMode = GenerationMode.EXTRAPOLATE)
 
 /**
  * GPU video path: MediaCodec decodes into [inputSurface]; every display vsync this thread
@@ -56,7 +57,13 @@ class GpuVideoRenderer(
 	private val upscalingRequested: Boolean,
 	private val frameGenerationRequested: Boolean,
 	private val hdr: Boolean = false,
-	private val tuning: GpuTuning = GpuTuning()
+	private val tuning: GpuTuning = GpuTuning(),
+	/**
+	 * Supplies the decoder's parsed HDR static metadata once available (null before). Polled once per
+	 * stats window on the render thread until it returns a usable value, which is then attached to the
+	 * window surface so the compositor tone maps like it does for the decoder's own buffers.
+	 */
+	private val hdrMetadataProvider: (() -> ByteArray?)? = null
 )
 {
 	companion object
@@ -67,6 +74,23 @@ class GpuVideoRenderer(
 		// EGL_KHR_gl_colorspace and EGL_EXT_gl_colorspace_bt2020_pq; android.opengl exposes neither constant.
 		private const val EGL_GL_COLORSPACE_KHR = 0x309D
 		private const val EGL_GL_COLORSPACE_BT2020_PQ_EXT = 0x3340
+		// EGL_EXT_surface_SMPTE2086_metadata / EGL_EXT_surface_CTA861_3_metadata
+		private const val EGL_SMPTE2086_DISPLAY_PRIMARY_RX_EXT = 0x3341
+		private const val EGL_SMPTE2086_DISPLAY_PRIMARY_RY_EXT = 0x3342
+		private const val EGL_SMPTE2086_DISPLAY_PRIMARY_GX_EXT = 0x3343
+		private const val EGL_SMPTE2086_DISPLAY_PRIMARY_GY_EXT = 0x3344
+		private const val EGL_SMPTE2086_DISPLAY_PRIMARY_BX_EXT = 0x3345
+		private const val EGL_SMPTE2086_DISPLAY_PRIMARY_BY_EXT = 0x3346
+		private const val EGL_SMPTE2086_WHITE_POINT_X_EXT = 0x3347
+		private const val EGL_SMPTE2086_WHITE_POINT_Y_EXT = 0x3348
+		private const val EGL_SMPTE2086_MAX_LUMINANCE_EXT = 0x3349
+		private const val EGL_SMPTE2086_MIN_LUMINANCE_EXT = 0x334A
+		private const val EGL_CTA861_3_MAX_CONTENT_LIGHT_LEVEL_EXT = 0x3360
+		private const val EGL_CTA861_3_MAX_FRAME_AVERAGE_LEVEL_EXT = 0x3361
+		private const val EGL_METADATA_SCALING_EXT = 50000
+		// GL_QCOM_motion_estimation
+		private const val GL_MOTION_ESTIMATION_SEARCH_BLOCK_X_QCOM = 0x8C90
+		private const val GL_MOTION_ESTIMATION_SEARCH_BLOCK_Y_QCOM = 0x8C91
 		private const val MAX_CONFIGS = 16
 	}
 
@@ -77,7 +101,7 @@ class GpuVideoRenderer(
 	 * 0 until the first real frame. Scanout adds one more vsync on top.
 	 */
 	data class Stats(val presentedFps: Double, val generatedFps: Double, val frameGenerationActive: Boolean, val upscalingActive: Boolean,
-		val outputWidth: Int, val outputHeight: Int, val latencyMs: Double)
+		val outputWidth: Int, val outputHeight: Int, val latencyMs: Double, val interpolating: Boolean)
 
 	private val thread = HandlerThread("GpuVideoRenderer").also { it.start() }
 	private val handler = Handler(thread.looper)
@@ -106,12 +130,29 @@ class GpuVideoRenderer(
 	private val ringFbo = IntArray(2)
 	private var newestSlot = 0 // index into ring of the most recent real frame
 	private var generatedTexture = 0
+	// Interpolation mode (GL_QCOM_motion_estimation): luma copies of the ring, block motion fields both
+	// ways, and an FBO so the warp shader can write the generated texture.
+	private var generatedFbo = 0
+	private val lumaTex = IntArray(2)
+	private val lumaFbo = IntArray(2)
+	private var mvTexAB = 0
+	private var mvTexBA = 0
+	private var lumaProgram = 0
+	private var warpProgram = 0
+	private var lumaWidth = 0
+	private var lumaHeight = 0
+	@Volatile private var interpolationActive = false
+	/** Decoder timestamp of the frame consumed by PRESENT_INTERPOLATED and shown at the next vsync. */
+	private var heldTimestampNs = 0L
 	private var oesCopyProgram = 0
 	private var oesTransformLoc = -1
 	private var presentProgram = 0 // SGSR1 or blit
 	@Volatile private var presentIsSgsr = false
 	@Volatile private var frameGenerationActive = false
 	private val transform = FloatArray(16)
+	/** Render thread only. Set once the provider returned usable metadata; re-applied to every new window surface. */
+	private var hdrMetadata: HdrStaticInfo? = null
+	private var hdrMetadataSupported = false
 
 	private var surfaceTexture: SurfaceTexture? = null
 	lateinit var inputSurface: Surface
@@ -194,7 +235,7 @@ class GpuVideoRenderer(
 			Log.w(TAG, "render thread did not release the window surface within ${SURFACE_TEARDOWN_TIMEOUT_MS} ms")
 	}
 
-	fun stats(): Stats = Stats(presentedFps, generatedFps, frameGenerationActive, presentIsSgsr, windowWidth, windowHeight, latencyMs)
+	fun stats(): Stats = Stats(presentedFps, generatedFps, frameGenerationActive, presentIsSgsr, windowWidth, windowHeight, latencyMs, interpolationActive)
 
 	/**
 	 * Stops presenting and frees all EGL/GL resources, blocking until the render thread is done.
@@ -252,6 +293,7 @@ class GpuVideoRenderer(
 		EGL14.eglQuerySurface(eglDisplay, windowSurface, EGL14.EGL_HEIGHT, h, 0)
 		windowWidth = if(w[0] > 0) w[0] else width
 		windowHeight = if(h[0] > 0) h[0] else height
+		hdrMetadata?.let { applyHdrMetadata(it) }
 		Log.i(TAG, "output surface ${windowWidth}x${windowHeight} (stream ${streamWidth}x${streamHeight}, upscale=$presentIsSgsr, framegen=$frameGenerationActive, hdr=$hdr)")
 	}
 
@@ -266,6 +308,9 @@ class GpuVideoRenderer(
 		{
 			val eglExtensions = EGL14.eglQueryString(eglDisplay, EGL14.EGL_EXTENSIONS) ?: ""
 			check(eglExtensions.contains("EGL_EXT_gl_colorspace_bt2020_pq")) { "HDR needs EGL_EXT_gl_colorspace_bt2020_pq" }
+			hdrMetadataSupported = eglExtensions.contains("EGL_EXT_surface_SMPTE2086_metadata")
+				&& eglExtensions.contains("EGL_EXT_surface_CTA861_3_metadata")
+			if(!hdrMetadataSupported) Log.w(TAG, "HDR static metadata extensions missing; compositor will use defaults")
 		}
 		// SDR: RGBA8. HDR: RGB10_A2, which Android maps to a RGBA_1010102 window buffer.
 		eglConfig = chooseConfig(colorBits = if(hdr) 10 else 8, alphaBits = if(hdr) 2 else 8)
@@ -344,15 +389,96 @@ class GpuVideoRenderer(
 		GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
 		checkGlError("init")
 
-		frameGenerationActive = frameGenerationRequested && AdrenoExt.nativeProbeFrameExtrapolation()
+		val extrapolationSupported = frameGenerationRequested && AdrenoExt.nativeProbeFrameExtrapolation()
+		if(frameGenerationRequested && tuning.generationMode == GenerationMode.INTERPOLATE)
+		{
+			interpolationActive = AdrenoExt.nativeProbeMotionEstimation() && setupInterpolation()
+			if(!interpolationActive)
+				Log.w(TAG, "interpolation unavailable, falling back to extrapolation (supported=$extrapolationSupported)")
+		}
+		frameGenerationActive = interpolationActive || extrapolationSupported
 		pacer.frameGenerationEnabled = frameGenerationActive
-		Log.i(TAG, "frame extrapolation supported=$frameGenerationActive requested=$frameGenerationRequested, tuning=$tuning")
+		pacer.generationMode = if(interpolationActive) GenerationMode.INTERPOLATE else GenerationMode.EXTRAPOLATE
+		Log.i(TAG, "frame generation active=$frameGenerationActive (extrapolation supported=$extrapolationSupported, interpolation=$interpolationActive) requested=$frameGenerationRequested, tuning=$tuning")
 
 		val st = SurfaceTexture(oesTexture)
 		st.setDefaultBufferSize(streamWidth, streamHeight)
 		st.setOnFrameAvailableListener({ frameAvailable.set(true) }, handler)
 		surfaceTexture = st
 		inputSurface = Surface(st)
+	}
+
+	/**
+	 * Allocates everything interpolation needs. The estimator wants R8 inputs whose size is a multiple
+	 * of its search block, so the luma textures are rounded up and the motion fields are block-sized.
+	 * Returns false (after logging) if the block size query fails; GL objects created so far are
+	 * released with everything else in [releaseGl].
+	 */
+	private fun setupInterpolation(): Boolean
+	{
+		val block = IntArray(2)
+		GLES31.glGetIntegerv(GL_MOTION_ESTIMATION_SEARCH_BLOCK_X_QCOM, block, 0)
+		GLES31.glGetIntegerv(GL_MOTION_ESTIMATION_SEARCH_BLOCK_Y_QCOM, block, 1)
+		if(block[0] <= 0 || block[1] <= 0)
+		{
+			Log.w(TAG, "motion estimation block size query failed: ${block[0]}x${block[1]}")
+			return false
+		}
+		lumaWidth = (streamWidth + block[0] - 1) / block[0] * block[0]
+		lumaHeight = (streamHeight + block[1] - 1) / block[1] * block[1]
+		val fieldWidth = lumaWidth / block[0]
+		val fieldHeight = lumaHeight / block[1]
+		val scaleX = streamWidth.toFloat() / lumaWidth
+		val scaleY = streamHeight.toFloat() / lumaHeight
+
+		lumaProgram = GlShaders.buildLumaProgram()
+		warpProgram = GlShaders.buildWarpProgram()
+		GLES31.glUseProgram(lumaProgram)
+		GLES31.glUniform1i(GLES31.glGetUniformLocation(lumaProgram, "ps0"), 0)
+		GLES31.glUniform2f(GLES31.glGetUniformLocation(lumaProgram, "uScale"), scaleX, scaleY)
+		GLES31.glUseProgram(warpProgram)
+		GLES31.glUniform1i(GLES31.glGetUniformLocation(warpProgram, "uTexA"), 0)
+		GLES31.glUniform1i(GLES31.glGetUniformLocation(warpProgram, "uTexB"), 1)
+		GLES31.glUniform1i(GLES31.glGetUniformLocation(warpProgram, "uMvAB"), 2)
+		GLES31.glUniform1i(GLES31.glGetUniformLocation(warpProgram, "uMvBA"), 3)
+		GLES31.glUniform2f(GLES31.glGetUniformLocation(warpProgram, "uTexel"), 1f / streamWidth, 1f / streamHeight)
+		GLES31.glUniform2f(GLES31.glGetUniformLocation(warpProgram, "uMvUvScale"), scaleX, scaleY)
+		GLES31.glUseProgram(0)
+
+		val ids = IntArray(4)
+		GLES31.glGenTextures(4, ids, 0)
+		lumaTex[0] = ids[0]
+		lumaTex[1] = ids[1]
+		mvTexAB = ids[2]
+		mvTexBA = ids[3]
+		for(tex in lumaTex)
+		{
+			GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, tex)
+			GLES31.glTexStorage2D(GLES31.GL_TEXTURE_2D, 1, GLES31.GL_R8, lumaWidth, lumaHeight)
+			setSamplerParams(GLES31.GL_TEXTURE_2D)
+		}
+		for(tex in intArrayOf(mvTexAB, mvTexBA))
+		{
+			GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, tex)
+			GLES31.glTexStorage2D(GLES31.GL_TEXTURE_2D, 1, GLES31.GL_RGBA16F, fieldWidth, fieldHeight)
+			setSamplerParams(GLES31.GL_TEXTURE_2D)
+		}
+		val fbos = IntArray(3)
+		GLES31.glGenFramebuffers(3, fbos, 0)
+		lumaFbo[0] = fbos[0]
+		lumaFbo[1] = fbos[1]
+		generatedFbo = fbos[2]
+		for((fbo, tex) in listOf(lumaFbo[0] to lumaTex[0], lumaFbo[1] to lumaTex[1], generatedFbo to generatedTexture))
+		{
+			GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, fbo)
+			GLES31.glFramebufferTexture2D(GLES31.GL_FRAMEBUFFER, GLES31.GL_COLOR_ATTACHMENT0, GLES31.GL_TEXTURE_2D, tex, 0)
+			val status = GLES31.glCheckFramebufferStatus(GLES31.GL_FRAMEBUFFER)
+			check(status == GLES31.GL_FRAMEBUFFER_COMPLETE) { "interpolation FBO incomplete: 0x${Integer.toHexString(status)}" }
+		}
+		GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+		checkGlError("interpolation init")
+		Log.i(TAG, "interpolation: search block ${block[0]}x${block[1]}, luma ${lumaWidth}x${lumaHeight}, motion field ${fieldWidth}x${fieldHeight}")
+		return true
 	}
 
 	/**
@@ -400,27 +526,8 @@ class GpuVideoRenderer(
 		{
 			PaceDecision.PRESENT_REAL ->
 			{
-				frameAvailable.set(false)
-				try
-				{
-					st.updateTexImage()
-				}
-				catch(e: RuntimeException)
-				{
-					// The decoder side is gone: treat it as the end of the session. The pacer has already
-					// recorded this frame, so reset it rather than let a later vsync extrapolate from a stale pair.
-					Log.w(TAG, "updateTexImage failed, stopping GPU path: ${e.message}")
-					pacer.reset()
-					presentedFps = 0.0
-					generatedFps = 0.0
-					latencyMs = 0.0
-					stopped = true
-					return
-				}
-				st.getTransformMatrix(transform)
+				if(!latchNewFrame(st)) return
 				recordLatency(frameTimeNanos, st.timestamp)
-				newestSlot = 1 - newestSlot
-				copyOesToSlot(newestSlot)
 				present(ring[newestSlot])
 			}
 			PaceDecision.PRESENT_GENERATED ->
@@ -435,9 +542,88 @@ class GpuVideoRenderer(
 						generatedInWindow++
 				}
 			}
+			PaceDecision.PRESENT_INTERPOLATED ->
+			{
+				if(!latchNewFrame(st)) return
+				heldTimestampNs = st.timestamp
+				if(windowSurface != EGL14.EGL_NO_SURFACE)
+				{
+					interpolate()
+					if(present(generatedTexture))
+						generatedInWindow++
+				}
+			}
+			PaceDecision.PRESENT_HELD_REAL ->
+			{
+				recordLatency(frameTimeNanos, heldTimestampNs)
+				present(ring[newestSlot])
+			}
 			PaceDecision.SKIP -> {}
 		}
 		updateStats(frameTimeNanos)
+	}
+
+	/**
+	 * Consumes the pending decoder frame into the next ring slot (plus its luma when interpolating).
+	 * Returns false when the decoder side is gone, which ends the GPU path for this session.
+	 */
+	private fun latchNewFrame(st: SurfaceTexture): Boolean
+	{
+		frameAvailable.set(false)
+		try
+		{
+			st.updateTexImage()
+		}
+		catch(e: RuntimeException)
+		{
+			// The pacer has already recorded this frame, so reset it rather than let a later vsync
+			// generate from a stale pair.
+			Log.w(TAG, "updateTexImage failed, stopping GPU path: ${e.message}")
+			pacer.reset()
+			presentedFps = 0.0
+			generatedFps = 0.0
+			latencyMs = 0.0
+			stopped = true
+			return false
+		}
+		st.getTransformMatrix(transform)
+		newestSlot = 1 - newestSlot
+		copyOesToSlot(newestSlot)
+		if(interpolationActive) renderLuma(newestSlot)
+		return true
+	}
+
+	private fun renderLuma(slot: Int)
+	{
+		GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, lumaFbo[slot])
+		GLES31.glViewport(0, 0, lumaWidth, lumaHeight)
+		GLES31.glUseProgram(lumaProgram)
+		GLES31.glActiveTexture(GLES31.GL_TEXTURE0)
+		GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, ring[slot])
+		GLES31.glDrawArrays(GLES31.GL_TRIANGLES, 0, 3)
+		GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+		checkGlError("luma")
+	}
+
+	/** Estimates motion both ways between the two ring slots and warps their midpoint into [generatedTexture]. */
+	private fun interpolate()
+	{
+		val older = 1 - newestSlot
+		AdrenoExt.nativeEstimateMotion(lumaTex[older], lumaTex[newestSlot], mvTexAB)
+		AdrenoExt.nativeEstimateMotion(lumaTex[newestSlot], lumaTex[older], mvTexBA)
+		checkGlError("motion estimation")
+		GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, generatedFbo)
+		GLES31.glViewport(0, 0, streamWidth, streamHeight)
+		GLES31.glUseProgram(warpProgram)
+		for((unit, tex) in listOf(ring[older], ring[newestSlot], mvTexAB, mvTexBA).withIndex())
+		{
+			GLES31.glActiveTexture(GLES31.GL_TEXTURE0 + unit)
+			GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, tex)
+		}
+		GLES31.glDrawArrays(GLES31.GL_TRIANGLES, 0, 3)
+		GLES31.glActiveTexture(GLES31.GL_TEXTURE0)
+		GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
+		checkGlError("warp")
 	}
 
 	private fun copyOesToSlot(slot: Int)
@@ -478,6 +664,40 @@ class GpuVideoRenderer(
 		return true
 	}
 
+	/** Polls the decoder for HDR metadata until it has some, then attaches it to the window surface. */
+	private fun pollHdrMetadata()
+	{
+		if(!hdr || !hdrMetadataSupported || hdrMetadata != null) return
+		val provider = hdrMetadataProvider ?: return
+		val info = HdrStaticInfo.parse(provider()) ?: return
+		if(info.isEmpty) return
+		hdrMetadata = info
+		Log.i(TAG, "HDR static metadata: mastering ${info.maxLuminance}/${info.minLuminance} nits, MaxCLL ${info.maxContentLightLevel}, MaxFALL ${info.maxFrameAverageLightLevel}")
+		if(windowSurface != EGL14.EGL_NO_SURFACE) applyHdrMetadata(info)
+	}
+
+	private fun applyHdrMetadata(info: HdrStaticInfo)
+	{
+		fun scaled(v: Float) = (v * EGL_METADATA_SCALING_EXT).toLong().coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+		val attribs = listOf(
+			EGL_SMPTE2086_DISPLAY_PRIMARY_RX_EXT to info.redX, EGL_SMPTE2086_DISPLAY_PRIMARY_RY_EXT to info.redY,
+			EGL_SMPTE2086_DISPLAY_PRIMARY_GX_EXT to info.greenX, EGL_SMPTE2086_DISPLAY_PRIMARY_GY_EXT to info.greenY,
+			EGL_SMPTE2086_DISPLAY_PRIMARY_BX_EXT to info.blueX, EGL_SMPTE2086_DISPLAY_PRIMARY_BY_EXT to info.blueY,
+			EGL_SMPTE2086_WHITE_POINT_X_EXT to info.whiteX, EGL_SMPTE2086_WHITE_POINT_Y_EXT to info.whiteY,
+			EGL_SMPTE2086_MAX_LUMINANCE_EXT to info.maxLuminance, EGL_SMPTE2086_MIN_LUMINANCE_EXT to info.minLuminance,
+			EGL_CTA861_3_MAX_CONTENT_LIGHT_LEVEL_EXT to info.maxContentLightLevel,
+			EGL_CTA861_3_MAX_FRAME_AVERAGE_LEVEL_EXT to info.maxFrameAverageLightLevel)
+		for((attrib, value) in attribs)
+		{
+			if(!EGL14.eglSurfaceAttrib(eglDisplay, windowSurface, attrib, scaled(value)))
+			{
+				Log.w(TAG, "eglSurfaceAttrib(0x${Integer.toHexString(attrib)}) failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+				return
+			}
+		}
+		Log.i(TAG, "HDR static metadata attached to the window surface")
+	}
+
 	/** [decoderTimestampNs] is the native input timestamp (CLOCK_MONOTONIC) MediaCodec carried through; 0 if unknown. */
 	private fun recordLatency(vsyncNs: Long, decoderTimestampNs: Long)
 	{
@@ -499,6 +719,7 @@ class GpuVideoRenderer(
 		val elapsed = nowNs - windowStartNs
 		if(elapsed >= STATS_WINDOW_NS)
 		{
+			pollHdrMetadata()
 			presentedFps = presentedInWindow * 1e9 / elapsed
 			generatedFps = generatedInWindow * 1e9 / elapsed
 			latencyMs = if(latencyCount > 0) latencySumNs / latencyCount / 1e6 else 0.0
@@ -541,8 +762,11 @@ class GpuVideoRenderer(
 			// Names of 0 are silently ignored by glDelete*, so unset objects need no guard.
 			GLES31.glDeleteProgram(oesCopyProgram)
 			GLES31.glDeleteProgram(presentProgram)
+			GLES31.glDeleteProgram(lumaProgram)
+			GLES31.glDeleteProgram(warpProgram)
 			GLES31.glDeleteFramebuffers(2, ringFbo, 0)
-			GLES31.glDeleteTextures(4, intArrayOf(oesTexture, ring[0], ring[1], generatedTexture), 0)
+			GLES31.glDeleteFramebuffers(3, intArrayOf(lumaFbo[0], lumaFbo[1], generatedFbo), 0)
+			GLES31.glDeleteTextures(8, intArrayOf(oesTexture, ring[0], ring[1], generatedTexture, lumaTex[0], lumaTex[1], mvTexAB, mvTexBA), 0)
 		}
 		EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
 		if(pbufferSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(eglDisplay, pbufferSurface)

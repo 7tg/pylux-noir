@@ -558,7 +558,8 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 		else
 			parts.add("${m.width}×${m.height}$hdr")
 		g?.let { g ->
-			parts.add(String.format(Locale.US, "out %.0f FPS (gen %.0f, %s)", g.presentedFps, g.generatedFps, if(g.upscalingActive) "SGSR" else "bilinear"))
+			parts.add(String.format(Locale.US, "out %.0f FPS (gen %.0f%s, %s)", g.presentedFps, g.generatedFps,
+				if(g.interpolating) " interp" else "", if(g.upscalingActive) "SGSR" else "bilinear"))
 			if(g.latencyMs > 0)
 				parts.add(String.format(Locale.US, "lat %.0f ms", g.latencyMs))
 			parts.add(String.format(Locale.US, "%.0f Hz", DisplayModeHelper.currentRefreshRate(this)))

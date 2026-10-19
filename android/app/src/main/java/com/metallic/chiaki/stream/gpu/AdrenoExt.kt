@@ -11,8 +11,8 @@ import android.opengl.EGLSurface
 import android.util.Log
 
 /**
- * Bindings for the Adreno Frame Motion Engine (GL_QCOM_frame_extrapolation).
- * [nativeProbeFrameExtrapolation] and [nativeExtrapolateTex2D] require a current GL context.
+ * Bindings for the Adreno Frame Motion Engine (GL_QCOM_frame_extrapolation) and the block motion
+ * estimator (GL_QCOM_motion_estimation). All native functions require a current GL context.
  */
 object AdrenoExt
 {
@@ -25,8 +25,12 @@ object AdrenoExt
 
 	@JvmStatic external fun nativeProbeFrameExtrapolation(): Boolean
 	@JvmStatic external fun nativeExtrapolateTex2D(src1: Int, src2: Int, output: Int, scale: Float)
+	@JvmStatic external fun nativeProbeMotionEstimation(): Boolean
+	/** Writes per-block motion from [ref] to [target] (R8 textures) into [output] (RGBA16F, block resolution). */
+	@JvmStatic external fun nativeEstimateMotion(ref: Int, target: Int, output: Int)
 
 	@Volatile private var cachedSupport: Boolean? = null
+	@Volatile private var cachedMotionSupport: Boolean? = null
 
 	/**
 	 * Probes on the calling thread's current context if there is one, otherwise on a
@@ -36,17 +40,26 @@ object AdrenoExt
 	fun isFrameExtrapolationSupported(): Boolean
 	{
 		cachedSupport?.let { return it }
-		val result = try { probeOnPbuffer() } catch(e: Exception) { Log.w(TAG, "probe failed", e); false }
+		val result = try { probeOnPbuffer { nativeProbeFrameExtrapolation() } } catch(e: Exception) { Log.w(TAG, "probe failed", e); false }
 		cachedSupport = result
+		return result
+	}
+
+	/** Same contract as [isFrameExtrapolationSupported], for GL_QCOM_motion_estimation (interpolation mode). */
+	fun isMotionEstimationSupported(): Boolean
+	{
+		cachedMotionSupport?.let { return it }
+		val result = try { probeOnPbuffer { nativeProbeMotionEstimation() } } catch(e: Exception) { Log.w(TAG, "probe failed", e); false }
+		cachedMotionSupport = result
 		return result
 	}
 
 	private fun eglErrorHex(): String = "0x${Integer.toHexString(EGL14.eglGetError())}"
 
-	private fun probeOnPbuffer(): Boolean
+	private fun probeOnPbuffer(probe: () -> Boolean): Boolean
 	{
 		if(EGL14.eglGetCurrentContext() != EGL14.EGL_NO_CONTEXT)
-			return nativeProbeFrameExtrapolation()
+			return probe()
 
 		val display: EGLDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
 		if(display == EGL14.EGL_NO_DISPLAY)
@@ -101,7 +114,7 @@ object AdrenoExt
 					Log.w(TAG, "eglMakeCurrent failed: ${eglErrorHex()}")
 					return false
 				}
-				return nativeProbeFrameExtrapolation()
+				return probe()
 			}
 			finally
 			{

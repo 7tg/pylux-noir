@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-AGPL-3.0-only-OpenSSL
 //
 // JNI shim for the Qualcomm Adreno Frame Motion Engine, exposed to OpenGL ES as
-// GL_QCOM_frame_extrapolation (Khronos OpenGL ES extension #333). Both functions must be
-// called on a thread with an ES 3.x context current.
+// GL_QCOM_frame_extrapolation (Khronos OpenGL ES extension #333) and for the block motion
+// estimator GL_QCOM_motion_estimation (#326). All functions must be called on a thread with
+// an ES 3.x context current.
 
 #include <jni.h>
 #include <stdatomic.h>
@@ -18,10 +19,12 @@
 #define ADRENO_JNI(name) Java_com_metallic_chiaki_stream_gpu_AdrenoExt_##name
 
 typedef void (GL_APIENTRYP PFNGLEXTRAPOLATETEX2DQCOMPROC)(GLuint src1, GLuint src2, GLuint output, GLfloat scaleFactor);
+typedef void (GL_APIENTRYP PFNGLTEXESTIMATEMOTIONQCOMPROC)(GLuint ref, GLuint target, GLuint output);
 
 // The renderer must run the probe on its own context before calling nativeExtrapolateTex2D;
 // the settings-screen probe only informs the UI.
 static _Atomic(PFNGLEXTRAPOLATETEX2DQCOMPROC) s_extrapolate = NULL;
+static _Atomic(PFNGLTEXESTIMATEMOTIONQCOMPROC) s_estimate_motion = NULL;
 
 static const char *renderer_name(void)
 {
@@ -69,4 +72,35 @@ JNIEXPORT void JNICALL ADRENO_JNI(nativeExtrapolateTex2D)(JNIEnv *env, jclass cl
 	if(!fn)
 		return;
 	fn((GLuint)src1, (GLuint)src2, (GLuint)output, scale);
+}
+
+JNIEXPORT jboolean JNICALL ADRENO_JNI(nativeProbeMotionEstimation)(JNIEnv *env, jclass cls)
+{
+	(void)env; (void)cls;
+	if(eglGetCurrentContext() == EGL_NO_CONTEXT)
+	{
+		LOGW("motion estimation probe called without a current EGL context");
+		return JNI_FALSE;
+	}
+	if(!gl_has_extension("GL_QCOM_motion_estimation"))
+	{
+		atomic_store_explicit(&s_estimate_motion, NULL, memory_order_release);
+		LOGI("GL_QCOM_motion_estimation not advertised by driver (renderer: %s)", renderer_name());
+		return JNI_FALSE;
+	}
+	PFNGLTEXESTIMATEMOTIONQCOMPROC fn = (PFNGLTEXESTIMATEMOTIONQCOMPROC)eglGetProcAddress("glTexEstimateMotionQCOM");
+	atomic_store_explicit(&s_estimate_motion, fn, memory_order_release);
+	LOGI("GL_QCOM_motion_estimation supported=%d (renderer: %s)", fn != NULL, renderer_name());
+	return fn != NULL ? JNI_TRUE : JNI_FALSE;
+}
+
+// ref and target: GL_R8 textures of identical size, multiples of the search block; output: RGBA16F of
+// size (w / block_x, h / block_y) receiving per-block motion from ref to target in pixels (R = x, G = y).
+JNIEXPORT void JNICALL ADRENO_JNI(nativeEstimateMotion)(JNIEnv *env, jclass cls, jint ref, jint target, jint output)
+{
+	(void)env; (void)cls;
+	PFNGLTEXESTIMATEMOTIONQCOMPROC fn = atomic_load_explicit(&s_estimate_motion, memory_order_acquire);
+	if(!fn)
+		return;
+	fn((GLuint)ref, (GLuint)target, (GLuint)output);
 }
