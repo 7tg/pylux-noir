@@ -27,6 +27,7 @@ import com.metallic.chiaki.common.Preferences
 import com.metallic.chiaki.common.ext.viewModelFactory
 import com.pylux.stream.databinding.ActivityStreamBinding
 import com.metallic.chiaki.lib.Codec
+import com.metallic.chiaki.stream.gpu.AdrenoExt
 import com.metallic.chiaki.lib.ConnectInfo
 import com.metallic.chiaki.lib.ConnectVideoProfile
 import com.metallic.chiaki.lib.StreamMetrics
@@ -179,6 +180,22 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 			updateStatsVisibility()
 			showOverlay()
 		}
+
+		// Live GPU toggles: persisted like the settings screen and applied to the running renderer.
+		// They only do something while the GPU path is attached (see updateGpuSwitches).
+		binding.upscalingSwitch.isChecked = viewModel.preferences.gpuUpscalingEnabled
+		binding.upscalingSwitch.setOnCheckedChangeListener { _, isChecked ->
+			viewModel.preferences.gpuUpscalingEnabled = isChecked
+			viewModel.session.setGpuUpscaling(isChecked)
+			showOverlay()
+		}
+		binding.frameGenSwitch.isChecked = viewModel.preferences.frameGenerationEnabled
+		binding.frameGenSwitch.setOnCheckedChangeListener { _, isChecked ->
+			viewModel.preferences.frameGenerationEnabled = isChecked
+			viewModel.session.setGpuFrameGeneration(isChecked)
+			showOverlay()
+		}
+		updateGpuSwitches()
 
 		// Handle back button — on TV show a disconnect confirmation dialog; on touch show the overlay
 		onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -466,8 +483,17 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 			hideOverlay()
 	}
 
+	/** The GPU toggles are greyed out when the session runs on the direct path (both were off at stream start). */
+	private fun updateGpuSwitches()
+	{
+		val live = viewModel.session.gpuPathActive
+		binding.upscalingSwitch.isEnabled = live
+		binding.frameGenSwitch.isEnabled = live && AdrenoExt.isFrameExtrapolationSupported()
+	}
+
 	private fun showOverlay()
 	{
+		updateGpuSwitches()
 		if (isTv()) return  // No touch overlay on TV
 		binding.overlay.isVisible = true
 		binding.overlay.animate()
