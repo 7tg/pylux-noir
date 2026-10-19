@@ -17,7 +17,6 @@ typedef struct android_chiaki_video_decoder_t
 	ChiakiMutex codec_mutex;
 	AMediaCodec *codec;
 	ANativeWindow *window;
-	uint64_t timestamp_cur;
 	ChiakiThread output_thread;
 	bool shutdown_output;
 	int32_t target_width;

@@ -539,7 +539,7 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 	}
 
 	/** Single compact top row with short labels, e.g.
-	 *  "4.7 Mbps • PL 1.1% • DF/s 0 • 60 FPS • 90 ms • 1920×1080 HDR → 2560×1440 • out 120 FPS (gen 60, SGSR) • 120 Hz". */
+	 *  "4.7 Mbps • PL 1.1% • DF/s 0 • 60 FPS • 90 ms • 1920×1080 HDR → 2560×1440 • out 120 FPS (gen 60, SGSR) • lat 12 ms • 120 Hz". */
 	private fun formatStats(m: StreamMetrics, dropsPerTick: Long): String
 	{
 		val sep = "   •   "
@@ -559,6 +559,8 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 			parts.add("${m.width}×${m.height}$hdr")
 		g?.let { g ->
 			parts.add(String.format(Locale.US, "out %.0f FPS (gen %.0f, %s)", g.presentedFps, g.generatedFps, if(g.upscalingActive) "SGSR" else "bilinear"))
+			if(g.latencyMs > 0)
+				parts.add(String.format(Locale.US, "lat %.0f ms", g.latencyMs))
 			parts.add(String.format(Locale.US, "%.0f Hz", DisplayModeHelper.currentRefreshRate(this)))
 		}
 		return parts.joinToString(sep)
