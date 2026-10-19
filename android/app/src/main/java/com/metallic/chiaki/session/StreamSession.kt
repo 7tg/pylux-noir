@@ -253,8 +253,18 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 			catch(e: Exception)
 			{
 				Log.e("StreamSession", "PSN connection failed", e)
-				discardUnpublished(started)
-				holepunchSession?.fini()
+				// A created native Session owns the holepunch session and frees it in
+				// chiaki_session_fini(); only fini() it ourselves if no Session exists.
+				if(started != null)
+					discardUnpublished(started)
+				else
+				{
+					val hpSessionToFini = holepunchSession
+					Thread {
+						hpSessionToFini?.fini()
+						Log.i("StreamSession", "Holepunch session finalized after failed PSN connection")
+					}.start()
+				}
 				holepunchSession = null
 				_state.postValue(StreamStateCreateError(CreateError(ErrorCode(-1))))
 			}

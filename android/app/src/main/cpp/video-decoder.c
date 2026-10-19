@@ -43,7 +43,6 @@ static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 		AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index, 0, 0, decoder->timestamp_cur++, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
 		AMediaCodec_stop(decoder->codec);
 		chiaki_mutex_unlock(&decoder->codec_mutex);
-		chiaki_thread_join(&decoder->output_thread, NULL);
 	}
 	else
 	{
@@ -51,6 +50,11 @@ static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 		AMediaCodec_stop(decoder->codec);
 		chiaki_mutex_unlock(&decoder->codec_mutex);
 	}
+	// Always join: AMediaCodec_stop() makes a pending dequeueOutputBuffer(-1) return an
+	// error, the output thread then sees shutdown_output under the mutex and exits. Deleting
+	// the codec (or resetting shutdown_output) while that thread still runs would let it
+	// dequeue from a NULL codec.
+	chiaki_thread_join(&decoder->output_thread, NULL);
 	// The session thread may still be feeding video_sample(); clear the codec under the
 	// mutex so it cannot observe a deleted AMediaCodec.
 	chiaki_mutex_lock(&decoder->codec_mutex);
