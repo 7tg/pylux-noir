@@ -26,7 +26,7 @@ Obtainium, following the same pattern as the user's `artemis-noir` fork.
 - Interpolation using `GL_QCOM_motion_estimation` plus a custom warp shader. Possible
   later as a second mode; out of scope now.
 - iOS, desktop (Qt), or lib/ changes. Everything lives in `android/`.
-- HDR. Pylux Android does not stream HDR today.
+- HDR static metadata on the GPU path (the direct path keeps the stream's own; see HDR below).
 - Upstreaming to ForWard Technologies. Keep changes tidy, but no PR is planned.
 
 ## Hardware facts this design relies on
@@ -155,6 +155,32 @@ boolean in memory for the process lifetime. The settings fragment disables the f
 generation switch and sets its summary to "Not supported on this device" when false.
 The renderer also re-runs the native probe on its own context at startup and treats a
 negative result as "generation off".
+
+### HDR (added 2026-10-19)
+
+The Codec setting gains `H265 HDR (Gen 5 only)` (`Preferences.Codec.CODEC_H265_HDR`, value
+`h265_hdr`, maps to the existing `lib` codec `CHIAKI_CODEC_H265_HDR`; native already forces
+H264 on PS4). The console then sends HEVC Main10, BT.2020, PQ, which MediaCodec decodes into
+10-bit buffers tagged with that dataspace.
+
+- Direct path: unchanged. SurfaceFlinger composes the decoder's buffers as an HDR10 layer.
+- GPU path (`GpuVideoRenderer(hdr = true)`): the OES copy reads raw Y'CbCr through
+  `GL_EXT_YUV_target` (`__samplerExternal2DY2YEXT`) and applies the BT.2020 limited-range
+  matrix itself, because the implicit samplerExternalOES conversion is driver-defined for
+  10-bit content. Values stay PQ-encoded. Ring slots and the generated texture are
+  `GL_RGBA16F` (in the extrapolation extension's format list), SGSR1 and the blit are format
+  agnostic, and the window surface uses a RGB10_A2 config created with
+  `EGL_GL_COLORSPACE_KHR = EGL_GL_COLORSPACE_BT2020_PQ_EXT`, so the SurfaceView buffer carries
+  the BT.2020 PQ dataspace like a video player's. The frame pacer and stats are untouched.
+- Preconditions checked in `initGl`: `EGL_EXT_gl_colorspace_bt2020_pq` and
+  `GL_EXT_YUV_target`; if either is missing the renderer fails to start and the session uses
+  the direct path, which still shows HDR.
+- The native output thread logs the decoder's parsed `color-standard`/`color-transfer`/
+  `color-range` on the first output format change, so a console that answers in SDR is
+  visible in the log. The stats overlay appends `HDR` to the stream resolution when the HDR
+  codec is in effect.
+- Not done: HDR static metadata (SMPTE 2086 / CTA-861.3) on the GPU path's EGL surface; the
+  compositor uses its defaults for the layer.
 
 ## Failure handling
 

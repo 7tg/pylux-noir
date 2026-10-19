@@ -53,6 +53,17 @@ class GlShadersTest
 		GlShaders.patchSgsr1Source("#version 300 es\n")
 	}
 
+	@Test
+	fun hdrCopyShaderReadsRawYuvAndWritesOpaque()
+	{
+		val src = GlShaders.OES_COPY_HDR_FRAG_SRC
+		assertTrue(src.contains("#extension GL_EXT_YUV_target : require"))
+		assertTrue(src.contains("__samplerExternal2DY2YEXT uTex"))
+		assertTrue(src.contains("precision highp float;"))
+		// same uniform names as the SDR copy, so the renderer binds both alike
+		assertTrue(src.contains("uniform highp mat4 uTransform;"))
+	}
+
 	private fun findGlslang(): String?
 	{
 		val dirs = (System.getenv("PATH") ?: "").split(File.pathSeparator)
@@ -79,6 +90,7 @@ class GlShadersTest
 			val vert = File(dir, "full.vert").also { it.writeText(GlShaders.VERTEX_SRC) }
 			val frags = mapOf(
 				"oes" to GlShaders.OES_COPY_FRAG_SRC,
+				"oes-hdr" to GlShaders.OES_COPY_HDR_FRAG_SRC,
 				"blit" to GlShaders.BLIT_FRAG_SRC,
 				"sgsr1" to GlShaders.patchSgsr1Source(raw))
 			for((name, src) in frags)

@@ -27,6 +27,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * presents either the newest decoded frame or a hardware-extrapolated one, upscaled with
  * SGSR1 (or a plain blit) onto the SurfaceView's surface.
  *
+ * HDR ([hdr]): the decoder's 10-bit BT.2020 PQ frames are converted explicitly from Y'CbCr
+ * (GL_EXT_YUV_target), kept PQ-encoded in RGBA16F ring slots (a format the extrapolation
+ * extension accepts), and presented on a 10-bit window surface tagged BT.2020 PQ, which
+ * SurfaceFlinger composes as an HDR10 layer like a video player's output.
+ *
  * Threading: all GL work happens on the private render thread, whose [HandlerThread] starts
  * in the constructor, so construct this only when the GPU path will actually be used. Public
  * methods are safe to call from any thread other than the render thread; [start] and [release]
@@ -38,7 +43,8 @@ class GpuVideoRenderer(
 	private val streamHeight: Int,
 	streamFps: Int,
 	private val upscalingRequested: Boolean,
-	private val frameGenerationRequested: Boolean
+	private val frameGenerationRequested: Boolean,
+	private val hdr: Boolean = false
 )
 {
 	companion object
@@ -47,6 +53,10 @@ class GpuVideoRenderer(
 		private const val EXTRAPOLATION_SCALE = 0.5f
 		private const val STATS_WINDOW_NS = 1_000_000_000L
 		private const val SURFACE_TEARDOWN_TIMEOUT_MS = 500L
+		// EGL_KHR_gl_colorspace and EGL_EXT_gl_colorspace_bt2020_pq; android.opengl exposes neither constant.
+		private const val EGL_GL_COLORSPACE_KHR = 0x309D
+		private const val EGL_GL_COLORSPACE_BT2020_PQ_EXT = 0x3340
+		private const val MAX_CONFIGS = 16
 	}
 
 	/** [outputWidth]/[outputHeight] are the window surface size, 0 while no surface is attached. */
@@ -202,7 +212,9 @@ class GpuVideoRenderer(
 	{
 		destroyWindowSurface()
 		if(surface == null || !surface.isValid) return
-		windowSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, surface, intArrayOf(EGL14.EGL_NONE), 0)
+		val surfaceAttribs = if(hdr) intArrayOf(EGL_GL_COLORSPACE_KHR, EGL_GL_COLORSPACE_BT2020_PQ_EXT, EGL14.EGL_NONE)
+			else intArrayOf(EGL14.EGL_NONE)
+		windowSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, surface, surfaceAttribs, 0)
 		if(windowSurface == EGL14.EGL_NO_SURFACE)
 		{
 			Log.e(TAG, "eglCreateWindowSurface failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
@@ -221,7 +233,7 @@ class GpuVideoRenderer(
 		EGL14.eglQuerySurface(eglDisplay, windowSurface, EGL14.EGL_HEIGHT, h, 0)
 		windowWidth = if(w[0] > 0) w[0] else width
 		windowHeight = if(h[0] > 0) h[0] else height
-		Log.i(TAG, "output surface ${windowWidth}x${windowHeight} (stream ${streamWidth}x${streamHeight}, upscale=$presentIsSgsr, framegen=$frameGenerationActive)")
+		Log.i(TAG, "output surface ${windowWidth}x${windowHeight} (stream ${streamWidth}x${streamHeight}, upscale=$presentIsSgsr, framegen=$frameGenerationActive, hdr=$hdr)")
 	}
 
 
@@ -231,15 +243,13 @@ class GpuVideoRenderer(
 		check(eglDisplay != EGL14.EGL_NO_DISPLAY) { "eglGetDisplay failed" }
 		val version = IntArray(2)
 		check(EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) { "eglInitialize failed" }
-		val configAttribs = intArrayOf(
-			EGL14.EGL_RENDERABLE_TYPE, EGLExt.EGL_OPENGL_ES3_BIT_KHR,
-			EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT or EGL14.EGL_PBUFFER_BIT,
-			EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8, EGL14.EGL_ALPHA_SIZE, 8,
-			EGL14.EGL_NONE)
-		val configs = arrayOfNulls<EGLConfig>(1)
-		val num = IntArray(1)
-		check(EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, num, 0) && num[0] > 0) { "no ES3 EGL config" }
-		eglConfig = checkNotNull(configs[0]) { "eglChooseConfig returned no config" }
+		if(hdr)
+		{
+			val eglExtensions = EGL14.eglQueryString(eglDisplay, EGL14.EGL_EXTENSIONS) ?: ""
+			check(eglExtensions.contains("EGL_EXT_gl_colorspace_bt2020_pq")) { "HDR needs EGL_EXT_gl_colorspace_bt2020_pq" }
+		}
+		// SDR: RGBA8. HDR: RGB10_A2, which Android maps to a RGBA_1010102 window buffer.
+		eglConfig = chooseConfig(colorBits = if(hdr) 10 else 8, alphaBits = if(hdr) 2 else 8)
 		eglContext = EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT,
 			intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE), 0)
 		check(eglContext != EGL14.EGL_NO_CONTEXT) { "eglCreateContext failed" }
@@ -247,10 +257,15 @@ class GpuVideoRenderer(
 			intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE), 0)
 		check(pbufferSurface != EGL14.EGL_NO_SURFACE) { "eglCreatePbufferSurface failed" }
 		check(EGL14.eglMakeCurrent(eglDisplay, pbufferSurface, pbufferSurface, eglContext)) { "eglMakeCurrent failed" }
-		Log.i(TAG, "GL ${GLES31.glGetString(GLES31.GL_VERSION)} on ${GLES31.glGetString(GLES31.GL_RENDERER)}")
+		Log.i(TAG, "GL ${GLES31.glGetString(GLES31.GL_VERSION)} on ${GLES31.glGetString(GLES31.GL_RENDERER)}, hdr=$hdr")
+		if(hdr)
+		{
+			val glExtensions = GLES31.glGetString(GLES31.GL_EXTENSIONS) ?: ""
+			check(glExtensions.split(' ').contains("GL_EXT_YUV_target")) { "HDR needs GL_EXT_YUV_target" }
+		}
 
 		// Programs: the copy shader is mandatory; SGSR failure only degrades to the blit.
-		oesCopyProgram = GlShaders.buildOesCopyProgram()
+		oesCopyProgram = GlShaders.buildOesCopyProgram(hdr)
 		presentProgram = if(upscalingRequested)
 		{
 			try
@@ -282,7 +297,9 @@ class GpuVideoRenderer(
 		}
 		GLES31.glUseProgram(0)
 
-		// Textures: external input, 2-slot ring, generated output (RGBA8, stream size, identical).
+		// Textures: external input, 2-slot ring, generated output (stream size, identical format: RGBA8,
+		// or RGBA16F for PQ-encoded HDR; both are accepted by glExtrapolateTex2DQCOM).
+		val ringFormat = if(hdr) GLES31.GL_RGBA16F else GLES31.GL_RGBA8
 		val ids = IntArray(4)
 		GLES31.glGenTextures(4, ids, 0)
 		oesTexture = ids[0]
@@ -294,7 +311,7 @@ class GpuVideoRenderer(
 		for(tex in intArrayOf(ring[0], ring[1], generatedTexture))
 		{
 			GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, tex)
-			GLES31.glTexStorage2D(GLES31.GL_TEXTURE_2D, 1, GLES31.GL_RGBA8, streamWidth, streamHeight)
+			GLES31.glTexStorage2D(GLES31.GL_TEXTURE_2D, 1, ringFormat, streamWidth, streamHeight)
 			setSamplerParams(GLES31.GL_TEXTURE_2D)
 		}
 		GLES31.glGenFramebuffers(2, ringFbo, 0)
@@ -317,6 +334,32 @@ class GpuVideoRenderer(
 		st.setOnFrameAvailableListener({ frameAvailable.set(true) }, handler)
 		surfaceTexture = st
 		inputSurface = Surface(st)
+	}
+
+	/**
+	 * Picks an ES3 window+pbuffer config with exactly [colorBits] per colour channel. eglChooseConfig
+	 * sorts deeper colour buffers first, so an exact match is enforced here rather than taking its first result.
+	 */
+	private fun chooseConfig(colorBits: Int, alphaBits: Int): EGLConfig
+	{
+		val attribs = intArrayOf(
+			EGL14.EGL_RENDERABLE_TYPE, EGLExt.EGL_OPENGL_ES3_BIT_KHR,
+			EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT or EGL14.EGL_PBUFFER_BIT,
+			EGL14.EGL_RED_SIZE, colorBits, EGL14.EGL_GREEN_SIZE, colorBits, EGL14.EGL_BLUE_SIZE, colorBits, EGL14.EGL_ALPHA_SIZE, alphaBits,
+			EGL14.EGL_NONE)
+		val configs = arrayOfNulls<EGLConfig>(MAX_CONFIGS)
+		val num = IntArray(1)
+		check(EGL14.eglChooseConfig(eglDisplay, attribs, 0, configs, 0, MAX_CONFIGS, num, 0) && num[0] > 0) { "no ES3 EGL config with $colorBits-bit colour" }
+		val value = IntArray(1)
+		for(i in 0 until num[0])
+		{
+			val config = configs[i] ?: continue
+			EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_RED_SIZE, value, 0)
+			if(value[0] != colorBits) continue
+			EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_ALPHA_SIZE, value, 0)
+			if(value[0] == alphaBits) return config
+		}
+		throw IllegalStateException("no EGL config with exactly R${colorBits}G${colorBits}B${colorBits}A$alphaBits")
 	}
 
 	private fun setSamplerParams(target: Int)

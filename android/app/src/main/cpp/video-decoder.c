@@ -229,6 +229,23 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 				break;
 			}
 		}
+		else if(status == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
+		{
+			// Diagnostic for HDR: shows what the decoder parsed from the stream's VUI.
+			// MediaFormat constants: color-standard 1=BT.709 6=BT.2020; color-transfer 3=SDR video
+			// 6=ST 2084 (PQ) 7=HLG; color-range 1=full 2=limited.
+			AMediaFormat *format = AMediaCodec_getOutputFormat(decoder->codec);
+			if(format)
+			{
+				int32_t standard = -1, transfer = -1, range = -1;
+				AMediaFormat_getInt32(format, "color-standard", &standard);
+				AMediaFormat_getInt32(format, "color-transfer", &transfer);
+				AMediaFormat_getInt32(format, "color-range", &range);
+				CHIAKI_LOGI(decoder->log, "Video decoder output format: color-standard=%d color-transfer=%d color-range=%d",
+						(int)standard, (int)transfer, (int)range);
+				AMediaFormat_delete(format);
+			}
+		}
 		else
 		{
 			chiaki_mutex_lock(&decoder->codec_mutex);

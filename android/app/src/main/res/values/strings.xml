@@ -113,6 +113,7 @@
     <string name="preferences_bitrate_auto">Auto (%d)</string>
     <string name="preferences_codec_title_h264">H264</string>
     <string name="preferences_codec_title_h265">H265 (Gen 5 only)</string>
+    <string name="preferences_codec_title_h265_hdr">H265 HDR (Gen 5 only, needs HDR enabled on the console)</string>
     <string name="preferences_pip_enabled_title">Picture-in-Picture</string>
     <string name="preferences_pip_enabled_summary">Enable PiP mode when minimizing during streaming (Android 8.0+)</string>
     <string name="preferences_gpu_upscaling_enabled_title">GPU upscaling (Snapdragon GSR)</string>

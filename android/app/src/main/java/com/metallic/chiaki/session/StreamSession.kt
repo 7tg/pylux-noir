@@ -321,7 +321,9 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 		if(cfg != null && cfg.enabled)
 		{
 			val vp = connectInfo.videoProfile
-			val candidate = GpuVideoRenderer(assets, vp.width, vp.height, vp.maxFPS, cfg.upscaling, cfg.frameGeneration)
+			// Native forces H264 on PS4, so HDR can only be in effect on a PS5 session.
+			val hdr = connectInfo.ps5 && vp.codec == Codec.CODEC_H265_HDR
+			val candidate = GpuVideoRenderer(assets, vp.width, vp.height, vp.maxFPS, cfg.upscaling, cfg.frameGeneration, hdr)
 			if(candidate.start())
 				renderer = candidate
 			else
