@@ -62,7 +62,7 @@ object DisplayModeHelper
 	/**
 	 * Tells SurfaceFlinger the surface wants [fps]; no-op before Android 11. The renderer draws
 	 * every vsync, so the source is not fixed-rate video (COMPATIBILITY_DEFAULT). On Android 12+
-	 * the switch is always allowed,.
+	 * the switch is always allowed (CHANGE_FRAME_RATE_ALWAYS).
 	 */
 	fun hintSurfaceFrameRate(surface: Surface, fps: Float)
 	{
