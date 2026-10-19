@@ -30,6 +30,11 @@ object DisplayModeHelper
 	 * Requests the highest-refresh mode at the current resolution for [activity]'s window and returns
 	 * the requested rate. The switch is asynchronous and the system may refuse it (peak refresh
 	 * setting, power saver); use [currentRefreshRate] to read what is actually in use.
+	 *
+	 * When no higher mode exists (an adaptive panel may already be at its peak rate when the activity
+	 * starts) the highest same-size mode is still pinned via the preferred mode id, so the panel does
+	 * not drop back later. The pinned mode id and the surface hint ([hintSurfaceFrameRate], re-issued
+	 * on every surfaceChanged) work together: the former selects the mode, the latter keeps it.
 	 */
 	fun applyHighestRefresh(activity: Activity): Float
 	{
@@ -39,12 +44,18 @@ object DisplayModeHelper
 		val current = display.mode.let { DisplayModeInfo(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate) }
 		val all = display.supportedModes.map { DisplayModeInfo(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate) }
 		val best = pickHighestRefresh(current, all)
+		val attrs = activity.window.attributes
 		if(best == null)
 		{
-			Log.i(TAG, "Keeping ${current.width}x${current.height} @ ${current.refreshRate} Hz (no higher mode)")
-			return current.refreshRate
+			// Already at the highest rate (or the only mode): pin it so an adaptive panel stays there.
+			val pin = all
+				.filter { it.width == current.width && it.height == current.height }
+				.maxByOrNull { it.refreshRate } ?: current
+			attrs.preferredDisplayModeId = pin.id
+			activity.window.attributes = attrs
+			Log.i(TAG, "Pinning ${pin.width}x${pin.height} @ ${pin.refreshRate} Hz (mode ${pin.id})")
+			return pin.refreshRate
 		}
-		val attrs = activity.window.attributes
 		attrs.preferredDisplayModeId = best.id
 		activity.window.attributes = attrs
 		Log.i(TAG, "Requested ${best.width}x${best.height} @ ${best.refreshRate} Hz (mode ${best.id})")

@@ -94,10 +94,11 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 	/** [SystemClock.elapsedRealtime] when this session entered [StreamStateConnected]; 0 if not connected. */
 	private var connectedAtElapsedRealtime: Long = 0L
 
-	/** Refresh rate the window asked for (the switch is asynchronous and may be refused). */
+	/** Refresh rate the surface hint targets: the mode requested for the window, or the active rate
+	 *  when no higher mode exists (the switch is asynchronous and may be refused). */
 	private var requestedRefreshRate = 60f
 
-	private fun wantsHighRefresh() = viewModel.preferences.preferHighRefresh || viewModel.preferences.frameGenerationEnabled
+	private fun wantsHighRefresh() = !isTv() && (viewModel.preferences.preferHighRefresh || viewModel.preferences.frameGenerationEnabled)
 
 	private fun applyDisplayModePreference()
 	{
@@ -537,7 +538,7 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 	}
 
 	/** Single compact top row with short labels, e.g.
-	 *  "4.7 Mbps • PL 1.1% • DF/s 0 • 60 FPS • 90 ms • 1280×720". */
+	 *  "4.7 Mbps • PL 1.1% • DF/s 0 • 60 FPS • 90 ms • 1280×720 • out 120 FPS (gen 60) • 120 Hz". */
 	private fun formatStats(m: StreamMetrics, dropsPerTick: Long): String
 	{
 		val sep = "   •   "
@@ -550,7 +551,7 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 			parts.add(String.format(Locale.US, "%.0f ms", m.rttMs))
 		parts.add("${m.width}×${m.height}")
 		viewModel.session.gpuStats?.let { g ->
-			parts.add(String.format(Locale.US, "out %.0f fps (gen %.0f)", g.presentedFps, g.generatedFps))
+			parts.add(String.format(Locale.US, "out %.0f FPS (gen %.0f)", g.presentedFps, g.generatedFps))
 			parts.add(String.format(Locale.US, "%.0f Hz", DisplayModeHelper.currentRefreshRate(this)))
 		}
 		return parts.joinToString(sep)
