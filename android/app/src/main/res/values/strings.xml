@@ -121,6 +121,12 @@
     <string name="preferences_frame_generation_enabled_title">Frame generation (Adreno Frame Motion Engine)</string>
     <string name="preferences_frame_generation_enabled_summary">Predict an extra frame between decoded frames to double the displayed frame rate</string>
     <string name="preferences_frame_generation_unsupported_summary">Not supported on this device (needs GL_QCOM_frame_extrapolation)</string>
+    <string name="preferences_sgsr_sharpness_title">Upscaling sharpness</string>
+    <string name="preferences_sgsr_sharpness_summary">%1$s (SGSR default 2.0; higher sharpens edges more, too high rings)</string>
+    <string name="preferences_sgsr_edge_threshold_title">Upscaling edge threshold</string>
+    <string name="preferences_sgsr_edge_threshold_summary">%1$d/255 (SGSR default 8; lower treats more detail as edges, higher leaves flat areas alone)</string>
+    <string name="preferences_frame_generation_scale_title">Frame generation distance</string>
+    <string name="preferences_frame_generation_scale_summary">%1$s of a frame (0.50 is the true midpoint; lower reduces artifacts but motion gets less even)</string>
     <string name="preferences_prefer_high_refresh_title">Prefer high refresh rate</string>
     <string name="preferences_prefer_high_refresh_summary">Switch the display to its highest refresh rate while streaming</string>
     <string name="preferences_swap_cross_moon_title">Swap Cross/Moon and Box/Pyramid Buttons</string>
@@ -329,6 +335,9 @@
     <string name="preferences_gpu_upscaling_enabled_key">gpu_upscaling_enabled</string>
     <string name="preferences_frame_generation_enabled_key">frame_generation_enabled</string>
     <string name="preferences_prefer_high_refresh_key">prefer_high_refresh</string>
+    <string name="preferences_sgsr_sharpness_key">sgsr_sharpness</string>
+    <string name="preferences_sgsr_edge_threshold_key">sgsr_edge_threshold</string>
+    <string name="preferences_frame_generation_scale_key">frame_generation_scale</string>
 
     <string name="donation_dialog_title">Support Pylux</string>
     <string name="donation_dialog_body">Pylux is built by the community. If you enjoy using it, please consider supporting its development. Your contribution helps fund continued updates and keeps the project alive.</string>

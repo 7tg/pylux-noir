@@ -7,6 +7,7 @@ import android.content.Context
 import androidx.lifecycle.*
 import com.metallic.chiaki.common.LogManager
 import com.metallic.chiaki.session.GpuPipelineConfig
+import com.metallic.chiaki.stream.gpu.GpuTuning
 import com.metallic.chiaki.session.StreamSession
 import com.metallic.chiaki.common.Preferences
 import com.metallic.chiaki.lib.*
@@ -19,7 +20,11 @@ class StreamViewModel(val application: Application, val connectInfo: ConnectInfo
 
 	val input = StreamInput(application, preferences)
 	val session = StreamSession(connectInfo, logManager, preferences.logVerbose, input, application.assets,
-		GpuPipelineConfig(upscaling = preferences.gpuUpscalingEnabled, frameGeneration = preferences.frameGenerationEnabled))
+		GpuPipelineConfig(upscaling = preferences.gpuUpscalingEnabled, frameGeneration = preferences.frameGenerationEnabled,
+			tuning = GpuTuning(
+				sgsrEdgeSharpness = preferences.sgsrSharpness / 10f,
+				sgsrEdgeThreshold255 = preferences.sgsrEdgeThreshold,
+				extrapolationScale = preferences.frameGenerationScale / 100f)))
 
 	private var _onScreenControlsEnabled = MutableLiveData<Boolean>(preferences.onScreenControlsEnabled)
 	val onScreenControlsEnabled: LiveData<Boolean> get() = _onScreenControlsEnabled

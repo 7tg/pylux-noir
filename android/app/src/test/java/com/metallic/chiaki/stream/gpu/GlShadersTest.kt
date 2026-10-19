@@ -47,6 +47,18 @@ class GlShadersTest
 		assertTrue(raw.contains("uniform mediump sampler2D ps0;"))
 	}
 
+	@Test
+	fun patchedSourceKeepsSgsrDefaultsUnlessTuned()
+	{
+		val defaults = GlShaders.patchSgsr1Source(raw)
+		assertTrue(defaults.contains("#define EdgeSharpness 2.00"))
+		assertTrue(defaults.contains("#define EdgeThreshold 8.0/255.0"))
+		val tuned = GlShaders.patchSgsr1Source(raw, edgeSharpness = 3.5f, edgeThreshold255 = 12)
+		assertTrue(tuned.contains("#define EdgeSharpness 3.50"))
+		assertTrue(tuned.contains("#define EdgeThreshold 12.0/255.0"))
+		assertFalse(tuned.contains("#define EdgeSharpness 2.0\n"))
+	}
+
 	@Test(expected = ShaderCompileException::class)
 	fun missingPatternThrows()
 	{
@@ -92,7 +104,8 @@ class GlShadersTest
 				"oes" to GlShaders.OES_COPY_FRAG_SRC,
 				"oes-hdr" to GlShaders.OES_COPY_HDR_FRAG_SRC,
 				"blit" to GlShaders.BLIT_FRAG_SRC,
-				"sgsr1" to GlShaders.patchSgsr1Source(raw))
+				"sgsr1" to GlShaders.patchSgsr1Source(raw),
+				"sgsr1-tuned" to GlShaders.patchSgsr1Source(raw, edgeSharpness = 0.5f, edgeThreshold255 = 32))
 			for((name, src) in frags)
 			{
 				val frag = File(dir, "$name.frag").also { it.writeText(src) }

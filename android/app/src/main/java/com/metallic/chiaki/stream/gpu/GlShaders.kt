@@ -4,6 +4,7 @@ package com.metallic.chiaki.stream.gpu
 
 import android.content.res.AssetManager
 import android.opengl.GLES31
+import java.util.Locale
 
 /** Thrown for shader compile failures, program link failures and an unexpected SGSR1 asset. */
 class ShaderCompileException(message: String): RuntimeException(message)
@@ -81,18 +82,27 @@ void main()
 		"int mode = OperationMode;" to "const int mode = OperationMode;",
 		"highp vec2(" to "vec2(")
 
+	/** SGSR1 shader defaults, kept here so the settings UI and the patcher agree. */
+	const val SGSR1_DEFAULT_EDGE_SHARPNESS = 2.0f
+	const val SGSR1_DEFAULT_EDGE_THRESHOLD_255 = 8
+
 	/**
-	 * Adapts the verbatim SGSR1 asset to GLSL ES 3.10 in memory:
+	 * Adapts the verbatim SGSR1 asset to GLSL ES 3.10 in memory and applies the user's tuning:
 	 * 1. `#version 300 es` becomes `310 es`, since textureGather only exists from GLSL ES 3.10 and our vertex shader is 3.10.
 	 * 2. The `layout(location=0)` qualifier on the input is dropped, as the vertex shader output has no location.
 	 * 3. `int mode` becomes `const int mode`, because textureGather's component argument must be a compile-time constant.
 	 * 4. `highp vec2(` becomes `vec2(` (all occurrences), since a precision qualifier is not allowed on a constructor call.
+	 * 5. The `EdgeSharpness` and `EdgeThreshold` defines take [edgeSharpness] and [edgeThreshold255]/255.
 	 * Throws [ShaderCompileException] if the asset no longer contains one of the expected patterns.
 	 */
-	fun patchSgsr1Source(raw: String): String
+	fun patchSgsr1Source(raw: String, edgeSharpness: Float = SGSR1_DEFAULT_EDGE_SHARPNESS,
+		edgeThreshold255: Int = SGSR1_DEFAULT_EDGE_THRESHOLD_255): String
 	{
+		val tuning = listOf(
+			"#define EdgeSharpness 2.0" to String.format(Locale.US, "#define EdgeSharpness %.2f", edgeSharpness),
+			"#define EdgeThreshold 8.0/255.0" to "#define EdgeThreshold $edgeThreshold255.0/255.0")
 		var result = raw
-		for((pattern, replacement) in SGSR1_PATCHES)
+		for((pattern, replacement) in SGSR1_PATCHES + tuning)
 		{
 			if(!result.contains(pattern))
 				throw ShaderCompileException("SGSR1 asset missing expected pattern: $pattern")
@@ -101,17 +111,19 @@ void main()
 		return result
 	}
 
-	fun loadSgsr1Source(assets: AssetManager): String
+	fun loadSgsr1Source(assets: AssetManager, edgeSharpness: Float, edgeThreshold255: Int): String
 	{
 		val raw = assets.open("shaders/sgsr1_shader_mobile.frag").bufferedReader().use { it.readText() }
-		return patchSgsr1Source(raw)
+		return patchSgsr1Source(raw, edgeSharpness, edgeThreshold255)
 	}
 
 	/** [hdr] selects the explicit BT.2020 conversion; the caller must have checked GL_EXT_YUV_target. */
 	fun buildOesCopyProgram(hdr: Boolean = false): Int =
 		if(hdr) link(VERTEX_SRC, OES_COPY_HDR_FRAG_SRC, "oes-copy-hdr") else link(VERTEX_SRC, OES_COPY_FRAG_SRC, "oes-copy")
 	fun buildBlitProgram(): Int = link(VERTEX_SRC, BLIT_FRAG_SRC, "blit")
-	fun buildSgsr1Program(assets: AssetManager): Int = link(VERTEX_SRC, loadSgsr1Source(assets), "sgsr1")
+	fun buildSgsr1Program(assets: AssetManager, edgeSharpness: Float = SGSR1_DEFAULT_EDGE_SHARPNESS,
+		edgeThreshold255: Int = SGSR1_DEFAULT_EDGE_THRESHOLD_255): Int =
+		link(VERTEX_SRC, loadSgsr1Source(assets, edgeSharpness, edgeThreshold255), "sgsr1")
 
 	private fun compile(type: Int, src: String, name: String): Int
 	{
