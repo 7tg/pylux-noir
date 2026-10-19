@@ -26,10 +26,15 @@ object DisplayModeHelper
 		return if(best.refreshRate > current.refreshRate + 0.5f) best else null
 	}
 
-	/** Applies the preferred mode to [activity]'s window. Returns the refresh rate now in use. */
-	@Suppress("DEPRECATION")
+	/**
+	 * Requests the highest-refresh mode at the current resolution for [activity]'s window and returns
+	 * the requested rate. The switch is asynchronous and the system may refuse it (peak refresh
+	 * setting, power saver); use [currentRefreshRate] to read what is actually in use.
+	 */
 	fun applyHighestRefresh(activity: Activity): Float
 	{
+		// activity.display is nullable before the activity is attached, so defaultDisplay is used deliberately.
+		@Suppress("DEPRECATION")
 		val display = activity.windowManager.defaultDisplay
 		val current = display.mode.let { DisplayModeInfo(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate) }
 		val all = display.supportedModes.map { DisplayModeInfo(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate) }
@@ -46,19 +51,33 @@ object DisplayModeHelper
 		return best.refreshRate
 	}
 
-	/** Tells SurfaceFlinger the surface wants [fps]; no-op before Android 11. */
+	/** The refresh rate of the display mode currently in use (for the stats overlay). */
+	fun currentRefreshRate(activity: Activity): Float
+	{
+		@Suppress("DEPRECATION")
+		val display = activity.windowManager.defaultDisplay
+		return display.mode.refreshRate
+	}
+
+	/**
+	 * Tells SurfaceFlinger the surface wants [fps]; no-op before Android 11. The renderer draws
+	 * every vsync, so the source is not fixed-rate video (COMPATIBILITY_DEFAULT). On Android 12+
+	 * the switch is always allowed,.
+	 */
 	fun hintSurfaceFrameRate(surface: Surface, fps: Float)
 	{
-		if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+		if(Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
+			return
+		try
 		{
-			try
-			{
-				surface.setFrameRate(fps, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
-			}
-			catch(e: IllegalArgumentException)
-			{
-				Log.w(TAG, "setFrameRate($fps) rejected: ${e.message}")
-			}
+			if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+				surface.setFrameRate(fps, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT, Surface.CHANGE_FRAME_RATE_ALWAYS)
+			else
+				surface.setFrameRate(fps, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+		}
+		catch(e: RuntimeException)
+		{
+			Log.w(TAG, "setFrameRate($fps) failed: ${e.message}")
 		}
 	}
 }
