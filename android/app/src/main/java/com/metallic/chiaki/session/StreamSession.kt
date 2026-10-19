@@ -56,6 +56,18 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 	@Volatile private var gpuRenderer: GpuVideoRenderer? = null
 	/** Non-null while the GPU path is active for the current session. */
 	val gpuStats get() = gpuRenderer?.stats()
+	/** True while the GPU path is attached, i.e. the live toggles below have an effect. */
+	val gpuPathActive get() = gpuRenderer != null
+
+	fun setGpuUpscaling(enabled: Boolean)
+	{
+		gpuRenderer?.setUpscaling(enabled)
+	}
+
+	fun setGpuFrameGeneration(enabled: Boolean)
+	{
+		gpuRenderer?.setFrameGeneration(enabled)
+	}
 
 	/**
 	 * Incremented by every [shutdown]. A connect thread captures it before creating its

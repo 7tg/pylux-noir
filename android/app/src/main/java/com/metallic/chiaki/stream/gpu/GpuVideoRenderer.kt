@@ -147,6 +147,11 @@ class GpuVideoRenderer(
 	private var oesCopyProgram = 0
 	private var oesTransformLoc = -1
 	private var presentProgram = 0 // SGSR1 or blit
+	private var blitProgram = 0
+	private var sgsrProgram = 0 // built on first use
+	private var sgsrFailed = false
+	private var extrapolationSupported = false
+	private var interpolationTried = false
 	@Volatile private var presentIsSgsr = false
 	@Volatile private var frameGenerationActive = false
 	private val transform = FloatArray(16)
@@ -233,6 +238,18 @@ class GpuVideoRenderer(
 		}
 		if(gone != null && posted && !gone.await(SURFACE_TEARDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS))
 			Log.w(TAG, "render thread did not release the window surface within ${SURFACE_TEARDOWN_TIMEOUT_MS} ms")
+	}
+
+	/** Switches SGSR upscaling on or off for the frames that follow. Asynchronous; safe from any thread. */
+	fun setUpscaling(enabled: Boolean)
+	{
+		handler.post { if(!released) applyUpscaling(enabled) }
+	}
+
+	/** Switches frame generation on or off for the frames that follow. Asynchronous; safe from any thread. */
+	fun setFrameGeneration(enabled: Boolean)
+	{
+		handler.post { if(!released) applyFrameGeneration(enabled) }
 	}
 
 	fun stats(): Stats = Stats(presentedFps, generatedFps, frameGenerationActive, presentIsSgsr, windowWidth, windowHeight, latencyMs, interpolationActive)
@@ -328,38 +345,18 @@ class GpuVideoRenderer(
 			check(glExtensions.split(' ').contains("GL_EXT_YUV_target")) { "HDR needs GL_EXT_YUV_target" }
 		}
 
-		// Programs: the copy shader is mandatory; SGSR failure only degrades to the blit.
+		// Programs: the copy shader and the blit are mandatory; SGSR is built when first enabled and a
+		// compile failure only means bilinear. Uniforms that never change are set once per program;
+		// only the OES transform is per frame.
 		oesCopyProgram = GlShaders.buildOesCopyProgram(hdr)
-		presentProgram = if(upscalingRequested)
-		{
-			try
-			{
-				val program = GlShaders.buildSgsr1Program(assets, tuning.sgsrEdgeSharpness, tuning.sgsrEdgeThreshold255, tuning.sgsrEdgeDirection)
-				presentIsSgsr = true
-				program
-			}
-			catch(e: ShaderCompileException)
-			{
-				Log.w(TAG, "SGSR1 unavailable, using bilinear blit: ${e.message}")
-				presentIsSgsr = false
-				GlShaders.buildBlitProgram()
-			}
-		}
-		else GlShaders.buildBlitProgram()
-
-		// Uniforms that never change are set once; only the OES transform is per frame.
 		GLES31.glUseProgram(oesCopyProgram)
 		GLES31.glUniform1i(GLES31.glGetUniformLocation(oesCopyProgram, "uTex"), 0)
 		oesTransformLoc = GLES31.glGetUniformLocation(oesCopyProgram, "uTransform")
-		GLES31.glUseProgram(presentProgram)
-		GLES31.glUniform1i(GLES31.glGetUniformLocation(presentProgram, "ps0"), 0)
-		if(presentIsSgsr)
-		{
-			var loc = GLES31.glGetUniformLocation(presentProgram, "ViewportInfo")
-			if(loc < 0) loc = GLES31.glGetUniformLocation(presentProgram, "ViewportInfo[0]")
-			GLES31.glUniform4f(loc, 1f / streamWidth, 1f / streamHeight, streamWidth.toFloat(), streamHeight.toFloat())
-		}
+		blitProgram = GlShaders.buildBlitProgram()
+		setPresentUniforms(blitProgram, sgsr = false)
+		presentProgram = blitProgram
 		GLES31.glUseProgram(0)
+		applyUpscaling(upscalingRequested)
 
 		// Textures: external input, 2-slot ring, generated output (stream size, identical format: RGBA8,
 		// or RGBA16F for PQ-encoded HDR; both are accepted by glExtrapolateTex2DQCOM).
@@ -389,23 +386,68 @@ class GpuVideoRenderer(
 		GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
 		checkGlError("init")
 
-		val extrapolationSupported = frameGenerationRequested && AdrenoExt.nativeProbeFrameExtrapolation()
-		if(frameGenerationRequested && tuning.generationMode == GenerationMode.INTERPOLATE)
-		{
-			interpolationActive = AdrenoExt.nativeProbeMotionEstimation() && setupInterpolation()
-			if(!interpolationActive)
-				Log.w(TAG, "interpolation unavailable, falling back to extrapolation (supported=$extrapolationSupported)")
-		}
-		frameGenerationActive = interpolationActive || extrapolationSupported
-		pacer.frameGenerationEnabled = frameGenerationActive
-		pacer.generationMode = if(interpolationActive) GenerationMode.INTERPOLATE else GenerationMode.EXTRAPOLATE
-		Log.i(TAG, "frame generation active=$frameGenerationActive (extrapolation supported=$extrapolationSupported, interpolation=$interpolationActive) requested=$frameGenerationRequested, tuning=$tuning")
+		// Probed unconditionally so the in-stream toggle can switch generation on later.
+		extrapolationSupported = AdrenoExt.nativeProbeFrameExtrapolation()
+		applyFrameGeneration(frameGenerationRequested)
 
 		val st = SurfaceTexture(oesTexture)
 		st.setDefaultBufferSize(streamWidth, streamHeight)
 		st.setOnFrameAvailableListener({ frameAvailable.set(true) }, handler)
 		surfaceTexture = st
 		inputSurface = Surface(st)
+	}
+
+	private fun setPresentUniforms(program: Int, sgsr: Boolean)
+	{
+		GLES31.glUseProgram(program)
+		GLES31.glUniform1i(GLES31.glGetUniformLocation(program, "ps0"), 0)
+		if(sgsr)
+		{
+			var loc = GLES31.glGetUniformLocation(program, "ViewportInfo")
+			if(loc < 0) loc = GLES31.glGetUniformLocation(program, "ViewportInfo[0]")
+			GLES31.glUniform4f(loc, 1f / streamWidth, 1f / streamHeight, streamWidth.toFloat(), streamHeight.toFloat())
+		}
+		GLES31.glUseProgram(0)
+	}
+
+	/** Render thread. Selects SGSR (building it on first use) or the blit for subsequent presents. */
+	private fun applyUpscaling(enabled: Boolean)
+	{
+		if(enabled && sgsrProgram == 0 && !sgsrFailed)
+		{
+			try
+			{
+				sgsrProgram = GlShaders.buildSgsr1Program(assets, tuning.sgsrEdgeSharpness, tuning.sgsrEdgeThreshold255, tuning.sgsrEdgeDirection)
+				setPresentUniforms(sgsrProgram, sgsr = true)
+			}
+			catch(e: ShaderCompileException)
+			{
+				sgsrFailed = true
+				Log.w(TAG, "SGSR1 unavailable, using bilinear blit: ${e.message}")
+			}
+		}
+		presentIsSgsr = enabled && sgsrProgram != 0
+		presentProgram = if(presentIsSgsr) sgsrProgram else blitProgram
+		Log.i(TAG, "upscaling ${if(presentIsSgsr) "SGSR1" else "bilinear"} (requested=$enabled)")
+	}
+
+	/**
+	 * Render thread. Enables generation if the hardware allows: interpolation when selected and the
+	 * motion estimator is available (set up on first use), otherwise extrapolation when supported.
+	 */
+	private fun applyFrameGeneration(enabled: Boolean)
+	{
+		if(enabled && tuning.generationMode == GenerationMode.INTERPOLATE && !interpolationActive && !interpolationTried)
+		{
+			interpolationTried = true
+			interpolationActive = AdrenoExt.nativeProbeMotionEstimation() && setupInterpolation()
+			if(!interpolationActive)
+				Log.w(TAG, "interpolation unavailable, falling back to extrapolation (supported=$extrapolationSupported)")
+		}
+		frameGenerationActive = enabled && (interpolationActive || extrapolationSupported)
+		pacer.frameGenerationEnabled = frameGenerationActive
+		pacer.generationMode = if(interpolationActive) GenerationMode.INTERPOLATE else GenerationMode.EXTRAPOLATE
+		Log.i(TAG, "frame generation active=$frameGenerationActive (extrapolation supported=$extrapolationSupported, interpolation=$interpolationActive) requested=$enabled, tuning=$tuning")
 	}
 
 	/**
@@ -477,6 +519,9 @@ class GpuVideoRenderer(
 		}
 		GLES31.glBindFramebuffer(GLES31.GL_FRAMEBUFFER, 0)
 		checkGlError("interpolation init")
+		// When enabled mid-stream the ring already holds frames whose luma was never rendered.
+		renderLuma(0)
+		renderLuma(1)
 		Log.i(TAG, "interpolation: search block ${block[0]}x${block[1]}, luma ${lumaWidth}x${lumaHeight}, motion field ${fieldWidth}x${fieldHeight}")
 		return true
 	}
@@ -761,7 +806,8 @@ class GpuVideoRenderer(
 		{
 			// Names of 0 are silently ignored by glDelete*, so unset objects need no guard.
 			GLES31.glDeleteProgram(oesCopyProgram)
-			GLES31.glDeleteProgram(presentProgram)
+			GLES31.glDeleteProgram(blitProgram)
+			GLES31.glDeleteProgram(sgsrProgram)
 			GLES31.glDeleteProgram(lumaProgram)
 			GLES31.glDeleteProgram(warpProgram)
 			GLES31.glDeleteFramebuffers(2, ringFbo, 0)
