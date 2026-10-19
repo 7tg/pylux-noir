@@ -97,9 +97,13 @@ void main()
 
 	/**
 	 * Midpoint interpolation between the older frame A and the newer frame B from two block motion
-	 * fields (A→B and B→A, in pixels, sampled bilinearly). Each field gives one candidate: the pair of
-	 * samples half a step back and forward along its vector; the candidate whose pair agrees better
-	 * (smaller luma difference, i.e. not an occlusion) gets the larger weight.
+	 * fields (A→B and B→A, in pixels, sampled bilinearly). Each field gives one candidate pair: the
+	 * samples half a step back and forward along its vector. Where the better pair agrees (the vector
+	 * really tracked that content) its two samples are averaged, which is sharp because they match.
+	 * Where neither pair agrees, the block vector is wrong or the area is being covered or revealed,
+	 * and averaging would paint a double image, so the pixel is taken from the newer real frame
+	 * instead: that region moves a half step unevenly, which the eye tolerates far better than a ghost.
+	 * The hand-over is a smoothstep on the disagreement so there are no hard seams.
 	 */
 	internal const val WARP_FRAG_SRC = """#version 310 es
 precision highp float;
@@ -111,7 +115,12 @@ uniform highp vec2 uTexel;
 uniform highp vec2 uMvUvScale;
 in highp vec4 in_TEXCOORD0;
 out vec4 fragColor;
-float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+const float AGREE = 0.03;
+float mismatch(vec3 a, vec3 b)
+{
+	vec3 d = abs(a - b);
+	return max(d.r, max(d.g, d.b));
+}
 void main()
 {
 	vec2 uv = in_TEXCOORD0.xy;
@@ -122,11 +131,12 @@ void main()
 	vec3 b1 = texture(uTexB, uv + 0.5 * vAB).rgb;
 	vec3 b2 = texture(uTexB, uv - 0.5 * vBA).rgb;
 	vec3 a2 = texture(uTexA, uv + 0.5 * vBA).rgb;
-	float w1 = 1.0 / (abs(luma(a1) - luma(b1)) + 0.002);
-	float w2 = 1.0 / (abs(luma(a2) - luma(b2)) + 0.002);
-	vec3 m1 = 0.5 * (a1 + b1);
-	vec3 m2 = 0.5 * (a2 + b2);
-	fragColor = vec4((m1 * w1 + m2 * w2) / (w1 + w2), 1.0);
+	float e1 = mismatch(a1, b1);
+	float e2 = mismatch(a2, b2);
+	vec3 tracked = e1 <= e2 ? 0.5 * (a1 + b1) : 0.5 * (a2 + b2);
+	float err = min(e1, e2);
+	vec3 fallback = texture(uTexB, uv).rgb;
+	fragColor = vec4(mix(tracked, fallback, smoothstep(AGREE, 2.0 * AGREE, err)), 1.0);
 }
 """
 
