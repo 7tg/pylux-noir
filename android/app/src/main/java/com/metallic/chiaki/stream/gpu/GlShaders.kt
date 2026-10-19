@@ -37,6 +37,32 @@ void main()
 }
 """
 
+	/**
+	 * HDR variant of the copy: HEVC Main10 frames arrive as 10-bit BT.2020 Y'CbCr. The implicit
+	 * samplerExternalOES conversion is driver-defined for that case, so the raw Y'CbCr is read through
+	 * GL_EXT_YUV_target and converted explicitly (BT.2020 non-constant luminance, limited range). The
+	 * result stays PQ-encoded; it is written to an RGBA16F ring slot and later to a BT.2020 PQ window.
+	 */
+	internal const val OES_COPY_HDR_FRAG_SRC = """#version 310 es
+#extension GL_EXT_YUV_target : require
+precision highp float;
+uniform __samplerExternal2DY2YEXT uTex;
+uniform highp mat4 uTransform;
+in highp vec4 in_TEXCOORD0;
+out vec4 fragColor;
+void main()
+{
+	highp vec2 tc = (uTransform * vec4(in_TEXCOORD0.xy, 0.0, 1.0)).xy;
+	vec3 yuv = texture(uTex, tc).xyz;
+	// 10-bit limited range: Y' 64..940, Cb/Cr 64..960 (of 1023), centred on 512.
+	float y = (yuv.x - 64.0 / 1023.0) * (1023.0 / 876.0);
+	float u = (yuv.y - 512.0 / 1023.0) * (1023.0 / 896.0);
+	float v = (yuv.z - 512.0 / 1023.0) * (1023.0 / 896.0);
+	vec3 rgb = vec3(y + 1.4746 * v, y - 0.164553 * u - 0.571353 * v, y + 1.8814 * u);
+	fragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+}
+"""
+
 	/** Bilinear blit used when SGSR upscaling is off. Uniform name matches SGSR1 so the renderer treats both alike. */
 	internal const val BLIT_FRAG_SRC = """#version 310 es
 precision mediump float;
@@ -81,7 +107,9 @@ void main()
 		return patchSgsr1Source(raw)
 	}
 
-	fun buildOesCopyProgram(): Int = link(VERTEX_SRC, OES_COPY_FRAG_SRC, "oes-copy")
+	/** [hdr] selects the explicit BT.2020 conversion; the caller must have checked GL_EXT_YUV_target. */
+	fun buildOesCopyProgram(hdr: Boolean = false): Int =
+		if(hdr) link(VERTEX_SRC, OES_COPY_HDR_FRAG_SRC, "oes-copy-hdr") else link(VERTEX_SRC, OES_COPY_FRAG_SRC, "oes-copy")
 	fun buildBlitProgram(): Int = link(VERTEX_SRC, BLIT_FRAG_SRC, "blit")
 	fun buildSgsr1Program(assets: AssetManager): Int = link(VERTEX_SRC, loadSgsr1Source(assets), "sgsr1")
 
