@@ -45,6 +45,7 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 		preferences.gpuUpscalingEnabledKey -> preferences.gpuUpscalingEnabled
 		preferences.frameGenerationEnabledKey -> preferences.frameGenerationEnabled
 		preferences.preferHighRefreshKey -> preferences.preferHighRefresh
+		preferences.sgsrEdgeDirectionKey -> preferences.sgsrEdgeDirection
 		preferences.pipEnabledKey -> preferences.pipEnabled
 		else -> defValue
 	}
@@ -62,6 +63,7 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 			preferences.gpuUpscalingEnabledKey -> preferences.gpuUpscalingEnabled = value
 			preferences.frameGenerationEnabledKey -> preferences.frameGenerationEnabled = value
 			preferences.preferHighRefreshKey -> preferences.preferHighRefresh = value
+			preferences.sgsrEdgeDirectionKey -> preferences.sgsrEdgeDirection = value
 			preferences.pipEnabledKey -> preferences.pipEnabled = value
 		}
 	}

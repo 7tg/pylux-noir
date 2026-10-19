@@ -12,6 +12,7 @@ import java.io.File
 class GlShadersTest
 {
 	private val raw: String = File("src/main/assets/shaders/sgsr1_shader_mobile.frag").readText()
+	private val rawEdge: String = File("src/main/assets/shaders/sgsr1_shader_mobile_edge_direction.frag").readText()
 
 	@Test
 	fun patchedSourceTargetsEs310()
@@ -57,6 +58,26 @@ class GlShadersTest
 		assertTrue(tuned.contains("#define EdgeSharpness 3.50"))
 		assertTrue(tuned.contains("#define EdgeThreshold 12.0/255.0"))
 		assertFalse(tuned.contains("#define EdgeSharpness 2.0\n"))
+	}
+
+	@Test
+	fun edgeDirectionAssetPatchesAndEnablesTheDefine()
+	{
+		val off = GlShaders.patchSgsr1Source(rawEdge)
+		assertTrue(off.startsWith("#version 310 es"))
+		assertTrue(off.contains("// #define UseEdgeDirection"))
+		assertFalse(off.contains("highp vec2("))
+		val on = GlShaders.patchSgsr1Source(rawEdge, edgeDirection = true)
+		assertTrue(on.contains("\n#define UseEdgeDirection"))
+		assertFalse(on.contains("// #define UseEdgeDirection"))
+		assertTrue(on.contains("#define EdgeSharpness 2.00"))
+		assertTrue(rawEdge.contains("SPDX-License-Identifier: BSD-3-Clause"))
+	}
+
+	@Test(expected = ShaderCompileException::class)
+	fun edgeDirectionNeedsTheEdgeDirectionAsset()
+	{
+		GlShaders.patchSgsr1Source(raw, edgeDirection = true)
 	}
 
 	@Test(expected = ShaderCompileException::class)
@@ -105,7 +126,9 @@ class GlShadersTest
 				"oes-hdr" to GlShaders.OES_COPY_HDR_FRAG_SRC,
 				"blit" to GlShaders.BLIT_FRAG_SRC,
 				"sgsr1" to GlShaders.patchSgsr1Source(raw),
-				"sgsr1-tuned" to GlShaders.patchSgsr1Source(raw, edgeSharpness = 0.5f, edgeThreshold255 = 32))
+				"sgsr1-tuned" to GlShaders.patchSgsr1Source(raw, edgeSharpness = 0.5f, edgeThreshold255 = 32),
+				"sgsr1-edge-off" to GlShaders.patchSgsr1Source(rawEdge),
+				"sgsr1-edge-on" to GlShaders.patchSgsr1Source(rawEdge, edgeDirection = true))
 			for((name, src) in frags)
 			{
 				val frag = File(dir, "$name.frag").also { it.writeText(src) }

@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 data class GpuTuning(
 	val sgsrEdgeSharpness: Float = GlShaders.SGSR1_DEFAULT_EDGE_SHARPNESS,
 	val sgsrEdgeThreshold255: Int = GlShaders.SGSR1_DEFAULT_EDGE_THRESHOLD_255,
+	val sgsrEdgeDirection: Boolean = true,
 	val extrapolationScale: Float = 0.5f)
 
 /**
@@ -280,7 +281,7 @@ class GpuVideoRenderer(
 		{
 			try
 			{
-				val program = GlShaders.buildSgsr1Program(assets, tuning.sgsrEdgeSharpness, tuning.sgsrEdgeThreshold255)
+				val program = GlShaders.buildSgsr1Program(assets, tuning.sgsrEdgeSharpness, tuning.sgsrEdgeThreshold255, tuning.sgsrEdgeDirection)
 				presentIsSgsr = true
 				program
 			}
