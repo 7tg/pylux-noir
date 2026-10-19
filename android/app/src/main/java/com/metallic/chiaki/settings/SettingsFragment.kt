@@ -44,6 +44,7 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 		preferences.gpuUpscalingEnabledKey -> preferences.gpuUpscalingEnabled
 		preferences.frameGenerationEnabledKey -> preferences.frameGenerationEnabled
 		preferences.preferHighRefreshKey -> preferences.preferHighRefresh
+		preferences.pipEnabledKey -> preferences.pipEnabled
 		else -> defValue
 	}
 
@@ -60,6 +61,7 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 			preferences.gpuUpscalingEnabledKey -> preferences.gpuUpscalingEnabled = value
 			preferences.frameGenerationEnabledKey -> preferences.frameGenerationEnabled = value
 			preferences.preferHighRefreshKey -> preferences.preferHighRefresh = value
+			preferences.pipEnabledKey -> preferences.pipEnabled = value
 		}
 	}
 
@@ -215,6 +217,14 @@ class SettingsFragment: PreferenceFragmentCompat(), TitleFragment
 		preferenceScreen.findPreference<ListPreference>(getString(R.string.preferences_fps_key))?.let {
 			it.entryValues = Preferences.fpsAll.map { fps -> fps.value }.toTypedArray()
 			it.entries = Preferences.fpsAll.map { fps -> getString(fps.title) }.toTypedArray()
+		}
+
+		preferenceScreen.findPreference<SwitchPreference>(getString(R.string.preferences_frame_generation_enabled_key))?.let {
+			if(!com.metallic.chiaki.stream.gpu.AdrenoExt.isFrameExtrapolationSupported())
+			{
+				it.isEnabled = false
+				it.summary = getString(R.string.preferences_frame_generation_unsupported_summary)
+			}
 		}
 
 		// Populate cloud datacenter dropdowns dynamically from saved ping results
