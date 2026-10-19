@@ -75,7 +75,7 @@ SurfaceTexture ──OnFrameAvailable──► GpuVideoRenderer thread (EGL/GLES
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
 | `GpuVideoRenderer` | `android/app/src/main/java/com/metallic/chiaki/stream/gpu/GpuVideoRenderer.kt` | Owns render `HandlerThread`, EGL display/context/window surface, SurfaceTexture + OES texture, 2-slot RGBA8 ring + 1 generated texture (all stream resolution), shader programs, Choreographer callback, counters. Exposes `inputSurface: Surface`, `setOutputSurface(Surface?, w, h)`, `release()`, `stats()`. |
-| `FramePacer` | `.../stream/gpu/FramePacer.kt` | Pure Kotlin decision logic: given `(nowNs, newFrameAvailable, realFramesSeen, lastRealNs, lastPresentedWasGenerated, streamIntervalNs, framegenEnabled)` returns `PRESENT_REAL`, `PRESENT_GENERATED`, or `SKIP`. No GL imports. Unit tested. |
+| `FramePacer` | `.../stream/gpu/FramePacer.kt` | Pure Kotlin, stateful decision logic owned by the renderer: constructed with `(streamIntervalNs, frameGenerationEnabled)`, `decide(nowNs, newFrameAvailable)` returns `PRESENT_REAL`, `PRESENT_GENERATED`, or `SKIP` and tracks real-frame count, last real timestamp and whether the last presented frame was generated internally. After a stall (previous real frame older than 1.5 intervals) it waits for a fresh consecutive pair before generating again. No GL imports. Unit tested. |
 | `GlShaders` | `.../stream/gpu/GlShaders.kt` | Compiles/links: OES copy (applies SurfaceTexture transform matrix), SGSR1 upscale, plain blit. Loads SGSR1 source from `assets/shaders/sgsr1_shader_mobile.frag` (verbatim from Qualcomm, BSD-3 header kept). |
 | `AdrenoExt` | `.../stream/gpu/AdrenoExt.kt` + `android/app/src/main/cpp/adreno-ext.c` | JNI: `nativeProbeFrameExtrapolation(): Boolean` (checks `GL_EXTENSIONS` for the string and `eglGetProcAddress("glExtrapolateTex2DQCOM") != NULL` on the current context) and `nativeExtrapolateTex2D(src1, src2, out, scale)`. Both must be called on the render thread. Links `GLESv3` and `EGL`. |
 | `DisplayModeHelper` | `.../stream/DisplayModeHelper.kt` | Picks the `Display.Mode` with the same physical size as the current mode and the highest refresh rate, sets `window.attributes.preferredDisplayModeId`, and on API 30+ calls `Surface.setFrameRate(120f, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)` on the SurfaceView surface. Returns the chosen rate for logging/stats. |
@@ -91,7 +91,7 @@ SurfaceTexture ──OnFrameAvailable──► GpuVideoRenderer thread (EGL/GLES
 3. `decision = pacer.decide(...)`.
 4. `PRESENT_REAL`: `surfaceTexture.updateTexImage()`; read transform matrix; draw OES
    texture into `ring[next]` FBO with the copy shader; `ring` index flips;
-   `realFramesSeen++`; `lastRealNs = frameTimeNanos`; present `ring[newest]`.
+   (the pacer updated its own real-frame bookkeeping inside `decide`); present `ring[newest]`.
 5. `PRESENT_GENERATED`: `AdrenoExt.nativeExtrapolateTex2D(ring[older], ring[newer], gen, 0.5f)`;
    `generated++`; present `gen`.
 6. `SKIP`: return without swapping.
@@ -103,8 +103,11 @@ SurfaceTexture ──OnFrameAvailable──► GpuVideoRenderer thread (EGL/GLES
 ### FramePacer rules (priority order)
 
 1. `newFrameAvailable` → `PRESENT_REAL`. A real frame always beats a prediction.
-2. `framegenEnabled && realFramesSeen >= 2 && !lastPresentedWasGenerated &&
-   (nowNs - lastRealNs) < 1.5 * streamIntervalNs` → `PRESENT_GENERATED`.
+2. `frameGenerationEnabled && realFramesSeen >= 2 && !lastPresentedWasGenerated &&
+   (nowNs - lastRealNs) < 1.5 * streamIntervalNs` → `PRESENT_GENERATED`. `realFramesSeen`
+   counts consecutive fresh real frames: a real frame arriving 1.5 intervals or more after
+   the previous one restarts the count at 1, so the two ring slots fed to the extrapolator
+   are never a stale pair.
 3. Otherwise → `SKIP`.
 
 Consequences: at most one generated frame between two real frames; a stalled or paused
