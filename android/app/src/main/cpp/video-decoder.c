@@ -9,6 +9,7 @@
 #include <android/native_window_jni.h>
 
 #include <string.h>
+#include <stdio.h>
 #include <time.h>
 
 /**
@@ -77,6 +78,18 @@ static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 	chiaki_mutex_unlock(&decoder->codec_mutex);
 }
 
+size_t android_chiaki_video_decoder_hdr_static_info(AndroidChiakiVideoDecoder *decoder, uint8_t *out, size_t out_size)
+{
+	chiaki_mutex_lock(&decoder->codec_mutex);
+	size_t n = decoder->hdr_static_info_size;
+	if(n > out_size)
+		n = out_size;
+	if(n)
+		memcpy(out, decoder->hdr_static_info, n);
+	chiaki_mutex_unlock(&decoder->codec_mutex);
+	return n;
+}
+
 void android_chiaki_video_decoder_fini(AndroidChiakiVideoDecoder *decoder)
 {
 	if(decoder->codec)
@@ -132,6 +145,13 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, mime);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, decoder->target_width);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, decoder->target_height);
+	// Remote Play has no B-frames, so ask the decoder to output every frame as soon as it is
+	// decoded instead of holding frames for reordering. "low-latency" is MediaFormat.KEY_LOW_LATENCY
+	// (Android 11+); the vendor key is honoured by older Qualcomm decoders. Unknown keys are ignored.
+	AMediaFormat_setInt32(format, "low-latency", 1);
+	AMediaFormat_setInt32(format, "vendor.qti-ext-dec-low-latency.enable", 1);
+	// MediaFormat.KEY_PRIORITY 0 = realtime.
+	AMediaFormat_setInt32(format, "priority", 0);
 
 	media_status_t r = AMediaCodec_configure(decoder->codec, format, decoder->window, NULL, 0);
 	if(r != AMEDIA_OK)
@@ -256,6 +276,21 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 				AMediaFormat_getInt32(format, "color-range", &range);
 				CHIAKI_LOGI(decoder->log, "Video decoder output format: color-standard=%d color-transfer=%d color-range=%d",
 						(int)standard, (int)transfer, (int)range);
+				// Mastering display / content light level metadata from the HEVC SEI, as Android's
+				// HDRStaticInfo Type 1 struct. The GPU path attaches it to its EGL surface.
+				void *info = NULL;
+				size_t info_size = 0;
+				if(AMediaFormat_getBuffer(format, "hdr-static-info", &info, &info_size) && info && info_size > 0)
+				{
+					chiaki_mutex_lock(&decoder->codec_mutex);
+					decoder->hdr_static_info_size = info_size < sizeof(decoder->hdr_static_info) ? info_size : sizeof(decoder->hdr_static_info);
+					memcpy(decoder->hdr_static_info, info, decoder->hdr_static_info_size);
+					chiaki_mutex_unlock(&decoder->codec_mutex);
+					char hex[3 * 32 + 1] = { 0 };
+					for(size_t i = 0; i < decoder->hdr_static_info_size; i++)
+						snprintf(hex + 3 * i, 4, "%02x ", decoder->hdr_static_info[i]);
+					CHIAKI_LOGI(decoder->log, "Video decoder HDR static info: %u bytes: %s", (unsigned)info_size, hex);
+				}
 				AMediaFormat_delete(format);
 			}
 		}
