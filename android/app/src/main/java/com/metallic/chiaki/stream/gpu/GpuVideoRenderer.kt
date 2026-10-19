@@ -49,7 +49,9 @@ class GpuVideoRenderer(
 		private const val SURFACE_TEARDOWN_TIMEOUT_MS = 500L
 	}
 
-	data class Stats(val presentedFps: Double, val generatedFps: Double, val frameGenerationActive: Boolean, val upscalingActive: Boolean)
+	/** [outputWidth]/[outputHeight] are the window surface size, 0 while no surface is attached. */
+	data class Stats(val presentedFps: Double, val generatedFps: Double, val frameGenerationActive: Boolean, val upscalingActive: Boolean,
+		val outputWidth: Int, val outputHeight: Int)
 
 	private val thread = HandlerThread("GpuVideoRenderer").also { it.start() }
 	private val handler = Handler(thread.looper)
@@ -69,8 +71,8 @@ class GpuVideoRenderer(
 	private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
 	private var pbufferSurface: EGLSurface = EGL14.EGL_NO_SURFACE
 	private var windowSurface: EGLSurface = EGL14.EGL_NO_SURFACE
-	private var windowWidth = 0
-	private var windowHeight = 0
+	@Volatile private var windowWidth = 0
+	@Volatile private var windowHeight = 0
 
 	// GL objects
 	private var oesTexture = 0
@@ -163,7 +165,7 @@ class GpuVideoRenderer(
 			Log.w(TAG, "render thread did not release the window surface within ${SURFACE_TEARDOWN_TIMEOUT_MS} ms")
 	}
 
-	fun stats(): Stats = Stats(presentedFps, generatedFps, frameGenerationActive, presentIsSgsr)
+	fun stats(): Stats = Stats(presentedFps, generatedFps, frameGenerationActive, presentIsSgsr, windowWidth, windowHeight)
 
 	/**
 	 * Stops presenting and frees all EGL/GL resources, blocking until the render thread is done.
