@@ -81,7 +81,7 @@ SurfaceTexture ──OnFrameAvailable──► GpuVideoRenderer thread (EGL/GLES
 | `DisplayModeHelper` | `.../stream/DisplayModeHelper.kt` | Picks the `Display.Mode` with the same physical size as the current mode and the highest refresh rate, sets `window.attributes.preferredDisplayModeId`, and on API 30+ calls `Surface.setFrameRate(120f, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)` on the SurfaceView surface. Returns the chosen rate for logging/stats. |
 | `Preferences` additions | `.../common/Preferences.kt`, `res/xml/preferences.xml`, `res/values/strings.xml` | `gpuUpscalingEnabled` (default true), `frameGenerationEnabled` (default true), `preferHighRefreshRate` (default true). |
 | `StreamSession` routing | `.../session/StreamSession.kt` | Decides per session: GPU path if `gpuUpscalingEnabled || frameGenerationEnabled`, else direct path. On GPU path, passes `renderer.inputSurface` to `session.setSurface()` and forwards SurfaceHolder changes to `renderer.setOutputSurface()`. |
-| Stats overlay | `StreamActivity.updateStatsOverlay()` | Appends `out <presentedFps> fps (gen <generatedFps>)` and the active display refresh rate. |
+| Stats overlay | `StreamActivity.updateStatsOverlay()` | Appends `out <presentedFps> FPS (gen <generatedFps>)` and the active display refresh rate. |
 
 ### Data flow per vsync (render thread)
 
@@ -210,7 +210,7 @@ Unit (JUnit, no device):
 On device (Tab S9, `./android/build-local.sh --quick --install` then `--logs-dump`):
 1. Logcat shows `GpuVideoRenderer: frame extrapolation supported=true` and
    `DisplayMode: Requested 2560x1600 @ 120.0 Hz`.
-2. Stats overlay reads approximately `out 120 fps (gen 60)` during a 60 fps stream.
+2. Stats overlay reads approximately `out 120 FPS (gen 60)` during a 60 fps stream.
 3. Visual: upscaled image is sharper than the direct path; generated frames show no
    tearing or flashing; fast camera pans show at most mild warping.
 4. Toggle each switch off and reconnect: upscale-only, generation-only, and direct path
