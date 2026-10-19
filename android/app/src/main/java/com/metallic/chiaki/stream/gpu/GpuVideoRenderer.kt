@@ -19,6 +19,7 @@ import android.util.Log
 import android.view.Choreographer
 import android.view.Surface
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -26,9 +27,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * presents either the newest decoded frame or a hardware-extrapolated one, upscaled with
  * SGSR1 (or a plain blit) onto the SurfaceView's surface.
  *
- * Threading: all GL work happens on the private render thread. Public methods are safe to
- * call from any thread other than the render thread; [start] and [release] block until the
- * render thread is done, so they must never be called from the render thread itself.
+ * Threading: all GL work happens on the private render thread, whose [HandlerThread] starts
+ * in the constructor, so construct this only when the GPU path will actually be used. Public
+ * methods are safe to call from any thread other than the render thread; [start] and [release]
+ * block until the render thread is done, so they must never be called from the render thread itself.
  */
 class GpuVideoRenderer(
 	private val assets: AssetManager,
@@ -44,6 +46,7 @@ class GpuVideoRenderer(
 		private const val TAG = "GpuVideoRenderer"
 		private const val EXTRAPOLATION_SCALE = 0.5f
 		private const val STATS_WINDOW_NS = 1_000_000_000L
+		private const val SURFACE_TEARDOWN_TIMEOUT_MS = 500L
 	}
 
 	data class Stats(val presentedFps: Double, val generatedFps: Double, val frameGenerationActive: Boolean, val upscalingActive: Boolean)
@@ -51,8 +54,13 @@ class GpuVideoRenderer(
 	private val thread = HandlerThread("GpuVideoRenderer").also { it.start() }
 	private val handler = Handler(thread.looper)
 	private val pacer = FramePacer(1_000_000_000L / streamFps.coerceAtLeast(1), frameGenerationRequested)
+	// A single flag suffices: the SurfaceTexture producer is non-blocking, queueBuffer replaces the
+	// last un-acquired buffer, and updateTexImage always latches the newest frame, so MediaCodec
+	// never stalls on us and no FIFO latency can build up between decoder and vsync.
 	private val frameAvailable = AtomicBoolean(false)
 	@Volatile private var released = false
+	/** Set when decoding has ended (updateTexImage failed); no further GL work happens afterwards. */
+	@Volatile private var stopped = false
 
 	// EGL
 	private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
@@ -86,7 +94,7 @@ class GpuVideoRenderer(
 	private var generatedInWindow = 0
 	@Volatile private var presentedFps = 0.0
 	@Volatile private var generatedFps = 0.0
-	private val loggedGlErrors = HashSet<Int>()
+	private val loggedGlErrors = HashSet<String>()
 
 	private val vsyncCallback = object: Choreographer.FrameCallback
 	{
@@ -102,48 +110,54 @@ class GpuVideoRenderer(
 	fun start(): Boolean
 	{
 		check(Looper.myLooper() != thread.looper) { "start() must not be called from the render thread" }
+		check(!released) { "start() after release()" }
 		var ok = false
 		val latch = CountDownLatch(1)
 		handler.post {
-			ok = try { initGl(); true } catch(e: Exception) { Log.e(TAG, "GPU path init failed: ${e.message}", e); false }
-			if(ok) Choreographer.getInstance().postFrameCallback(vsyncCallback)
-			latch.countDown()
+			try
+			{
+				initGl()
+				ok = true
+				Choreographer.getInstance().postFrameCallback(vsyncCallback)
+			}
+			catch(e: Throwable)
+			{
+				// Throwable: an UnsatisfiedLinkError or OOM must not leave the caller waiting forever.
+				Log.e(TAG, "GPU path init failed: ${e.message}", e)
+			}
+			finally
+			{
+				latch.countDown()
+			}
 		}
 		latch.await()
 		if(!ok) release()
 		return ok
 	}
 
-	/** New SurfaceView surface (or null when it is gone). Only the EGL window surface changes; decoding continues. */
+	/**
+	 * New SurfaceView surface (or null when it is gone). Only the EGL window surface changes; decoding continues.
+	 *
+	 * The null case blocks (bounded) until the render thread has destroyed the window surface, because the
+	 * SurfaceHolder contract requires that drawing has stopped before surfaceDestroyed returns. The
+	 * non-null case stays asynchronous. The render thread never waits on the caller, so this cannot deadlock.
+	 */
 	fun setOutputSurface(surface: Surface?, width: Int, height: Int)
 	{
-		handler.post {
-			if(released) return@post
-			destroyWindowSurface()
-			if(surface != null && surface.isValid)
+		val gone = if(surface == null) CountDownLatch(1) else null
+		val posted = handler.post {
+			try
 			{
-				windowSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, surface, intArrayOf(EGL14.EGL_NONE), 0)
-				if(windowSurface == EGL14.EGL_NO_SURFACE)
-				{
-					Log.e(TAG, "eglCreateWindowSurface failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
-					return@post
-				}
-				if(!EGL14.eglMakeCurrent(eglDisplay, windowSurface, windowSurface, eglContext))
-				{
-					Log.e(TAG, "eglMakeCurrent(window) failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
-					destroyWindowSurface()
-					return@post
-				}
-				EGL14.eglSwapInterval(eglDisplay, 1)
-				val w = IntArray(1)
-				val h = IntArray(1)
-				EGL14.eglQuerySurface(eglDisplay, windowSurface, EGL14.EGL_WIDTH, w, 0)
-				EGL14.eglQuerySurface(eglDisplay, windowSurface, EGL14.EGL_HEIGHT, h, 0)
-				windowWidth = if(w[0] > 0) w[0] else width
-				windowHeight = if(h[0] > 0) h[0] else height
-				Log.i(TAG, "output surface ${windowWidth}x${windowHeight} (stream ${streamWidth}x${streamHeight}, upscale=$presentIsSgsr, framegen=$frameGenerationActive)")
+				if(!released)
+					applyOutputSurface(surface, width, height)
+			}
+			finally
+			{
+				gone?.countDown()
 			}
 		}
+		if(gone != null && posted && !gone.await(SURFACE_TEARDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS))
+			Log.w(TAG, "render thread did not release the window surface within ${SURFACE_TEARDOWN_TIMEOUT_MS} ms")
 	}
 
 	fun stats(): Stats = Stats(presentedFps, generatedFps, frameGenerationActive, presentIsSgsr)
@@ -151,6 +165,9 @@ class GpuVideoRenderer(
 	/**
 	 * Stops presenting and frees all EGL/GL resources, blocking until the render thread is done.
 	 * Must be called from a thread other than the render thread (it would deadlock on itself).
+	 * The caller must stop the native decoder first (native setSurface(null) / session stop):
+	 * releasing the SurfaceTexture abandons its BufferQueue, and a decoder still queueing into
+	 * [inputSurface] would fail.
 	 */
 	fun release()
 	{
@@ -159,15 +176,48 @@ class GpuVideoRenderer(
 		released = true
 		val latch = CountDownLatch(1)
 		handler.post {
-			Choreographer.getInstance().removeFrameCallback(vsyncCallback)
-			releaseGl()
-			latch.countDown()
+			try
+			{
+				Choreographer.getInstance().removeFrameCallback(vsyncCallback)
+				releaseGl()
+			}
+			finally
+			{
+				latch.countDown()
+			}
 		}
 		latch.await()
 		thread.quitSafely()
 	}
 
 	// ---- render thread below ----
+
+	private fun applyOutputSurface(surface: Surface?, width: Int, height: Int)
+	{
+		destroyWindowSurface()
+		if(surface == null || !surface.isValid) return
+		windowSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, surface, intArrayOf(EGL14.EGL_NONE), 0)
+		if(windowSurface == EGL14.EGL_NO_SURFACE)
+		{
+			Log.e(TAG, "eglCreateWindowSurface failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+			return
+		}
+		if(!EGL14.eglMakeCurrent(eglDisplay, windowSurface, windowSurface, eglContext))
+		{
+			Log.e(TAG, "eglMakeCurrent(window) failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+			destroyWindowSurface()
+			return
+		}
+		EGL14.eglSwapInterval(eglDisplay, 1)
+		val w = IntArray(1)
+		val h = IntArray(1)
+		EGL14.eglQuerySurface(eglDisplay, windowSurface, EGL14.EGL_WIDTH, w, 0)
+		EGL14.eglQuerySurface(eglDisplay, windowSurface, EGL14.EGL_HEIGHT, h, 0)
+		windowWidth = if(w[0] > 0) w[0] else width
+		windowHeight = if(h[0] > 0) h[0] else height
+		Log.i(TAG, "output surface ${windowWidth}x${windowHeight} (stream ${streamWidth}x${streamHeight}, upscale=$presentIsSgsr, framegen=$frameGenerationActive)")
+	}
+
 
 	private fun initGl()
 	{
@@ -273,6 +323,7 @@ class GpuVideoRenderer(
 
 	private fun onVsync(frameTimeNanos: Long)
 	{
+		if(stopped) return
 		val st = surfaceTexture ?: return
 		val newFrame = frameAvailable.getAndSet(false)
 		when(pacer.decide(frameTimeNanos, newFrame))
@@ -285,7 +336,11 @@ class GpuVideoRenderer(
 				}
 				catch(e: RuntimeException)
 				{
-					Log.w(TAG, "updateTexImage failed: ${e.message}")
+					// The decoder side is gone: treat it as the end of the session. The pacer has already
+					// recorded this frame, so reset it rather than let a later vsync extrapolate from a stale pair.
+					Log.w(TAG, "updateTexImage failed, stopping GPU path: ${e.message}")
+					pacer.reset()
+					stopped = true
 					return
 				}
 				st.getTransformMatrix(transform)
@@ -295,10 +350,15 @@ class GpuVideoRenderer(
 			}
 			PaceDecision.PRESENT_GENERATED ->
 			{
-				AdrenoExt.nativeExtrapolateTex2D(ring[1 - newestSlot], ring[newestSlot], generatedTexture, EXTRAPOLATION_SCALE)
-				checkGlError("extrapolate")
-				if(present(generatedTexture))
-					generatedInWindow++
+				// Without a window surface the extrapolation would be wasted GPU work; the pacer's
+				// bookkeeping is the same either way.
+				if(windowSurface != EGL14.EGL_NO_SURFACE)
+				{
+					AdrenoExt.nativeExtrapolateTex2D(ring[1 - newestSlot], ring[newestSlot], generatedTexture, EXTRAPOLATION_SCALE)
+					checkGlError("extrapolate")
+					if(present(generatedTexture))
+						generatedInWindow++
+				}
 			}
 			PaceDecision.SKIP -> {}
 		}
@@ -318,7 +378,11 @@ class GpuVideoRenderer(
 		checkGlError("copy")
 	}
 
-	/** Draws [sourceTexture] to the window surface and swaps. Returns false when there is no window surface. */
+	/**
+	 * Draws [sourceTexture] to the window surface and swaps. Returns false when there is no window
+	 * surface or the swap failed. A failed swap means the surface is gone (or about to be); it is
+	 * destroyed so this logs once instead of at vsync rate, and the next [setOutputSurface] recreates it.
+	 */
 	private fun present(sourceTexture: Int): Boolean
 	{
 		if(windowSurface == EGL14.EGL_NO_SURFACE) return false
@@ -330,7 +394,11 @@ class GpuVideoRenderer(
 		GLES31.glDrawArrays(GLES31.GL_TRIANGLES, 0, 3)
 		checkGlError("present")
 		if(!EGL14.eglSwapBuffers(eglDisplay, windowSurface))
-			Log.w(TAG, "eglSwapBuffers failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+		{
+			Log.w(TAG, "eglSwapBuffers failed: 0x${Integer.toHexString(EGL14.eglGetError())}, dropping window surface")
+			destroyWindowSurface()
+			return false
+		}
 		presentedInWindow++
 		return true
 	}
@@ -356,8 +424,8 @@ class GpuVideoRenderer(
 	private fun checkGlError(where: String)
 	{
 		val err = GLES31.glGetError()
-		if(err != GLES31.GL_NO_ERROR && loggedGlErrors.add(err))
-			Log.w(TAG, "GL error 0x${Integer.toHexString(err)} in $where (logged once)")
+		if(err != GLES31.GL_NO_ERROR && loggedGlErrors.add("$where:$err"))
+			Log.w(TAG, "GL error 0x${Integer.toHexString(err)} in $where (logged once per site)")
 	}
 
 	private fun destroyWindowSurface()
@@ -382,8 +450,8 @@ class GpuVideoRenderer(
 			&& EGL14.eglMakeCurrent(eglDisplay, pbufferSurface, pbufferSurface, eglContext))
 		{
 			// Names of 0 are silently ignored by glDelete*, so unset objects need no guard.
-			if(oesCopyProgram != 0) GLES31.glDeleteProgram(oesCopyProgram)
-			if(presentProgram != 0) GLES31.glDeleteProgram(presentProgram)
+			GLES31.glDeleteProgram(oesCopyProgram)
+			GLES31.glDeleteProgram(presentProgram)
 			GLES31.glDeleteFramebuffers(2, ringFbo, 0)
 			GLES31.glDeleteTextures(4, intArrayOf(oesTexture, ring[0], ring[1], generatedTexture), 0)
 		}
