@@ -2,7 +2,16 @@
 
 package com.metallic.chiaki.stream.gpu
 
-enum class PaceDecision { PRESENT_REAL, PRESENT_GENERATED, SKIP }
+/**
+ * [PRESENT_REAL]: consume the new frame and present it. [PRESENT_GENERATED]: present an extrapolated
+ * frame (the new frame, if any, stays pending). [PRESENT_INTERPOLATED]: consume the new frame, present a
+ * frame interpolated between it and the previous one, and keep the new frame itself for the next vsync.
+ * [PRESENT_HELD_REAL]: present that kept frame now. [SKIP]: leave the screen as it is.
+ */
+enum class PaceDecision { PRESENT_REAL, PRESENT_GENERATED, PRESENT_INTERPOLATED, PRESENT_HELD_REAL, SKIP }
+
+/** Extrapolation predicts past the newest frame (lowest latency); interpolation shows the newest frame one vsync late. */
+enum class GenerationMode { EXTRAPOLATE, INTERPOLATE }
 
 /**
  * Decides, once per display vsync, whether to present a freshly decoded frame, a
@@ -24,12 +33,19 @@ enum class PaceDecision { PRESENT_REAL, PRESENT_GENERATED, SKIP }
  *    is younger than [MAX_REAL_AGE_INTERVALS] stream intervals.
  * 4. Otherwise skip (leave the last frame on screen).
  *
+ * Interpolation mode ([generationMode] = [GenerationMode.INTERPOLATE]): a new frame that follows a fresh
+ * previous frame yields [PaceDecision.PRESENT_INTERPOLATED] and is itself held for the next vsync
+ * ([PaceDecision.PRESENT_HELD_REAL]), so every real frame reaches the screen one vsync later than in
+ * extrapolation mode and the generated frame sits between two real frames instead of beyond the last.
+ * A held frame is always presented before a newer one is consumed, so the delay never grows past one vsync.
+ *
  * [decide] and [reset] must be called from the render thread only (their state is not
- * volatile); only [frameGenerationEnabled] may be set from another thread. [reset] leaves
+ * volatile); only [frameGenerationEnabled] and [generationMode] may be set from another thread. [reset] leaves
  * [frameGenerationEnabled] untouched. The recorded real-frame time is the vsync at which the
  * frame was consumed (up to one vsync later than its arrival), which the 1.5-interval margin absorbs.
  */
-class FramePacer(private val streamIntervalNs: Long, @Volatile var frameGenerationEnabled: Boolean)
+class FramePacer(private val streamIntervalNs: Long, @Volatile var frameGenerationEnabled: Boolean,
+	@Volatile var generationMode: GenerationMode = GenerationMode.EXTRAPOLATE)
 {
 	companion object
 	{
@@ -46,9 +62,20 @@ class FramePacer(private val streamIntervalNs: Long, @Volatile var frameGenerati
 	/** Vsync time at which the last PRESENT_REAL was returned. */
 	private var lastRealNs = Long.MIN_VALUE
 	private var lastPresentedWasGenerated = false
+	/** Interpolation mode: the newest consumed frame has not been shown yet. */
+	private var heldPending = false
 
 	fun decide(nowNs: Long, newFrameAvailable: Boolean): PaceDecision
 	{
+		if(heldPending)
+		{
+			// Applies in both modes so a mode switch cannot strand a consumed frame.
+			heldPending = false
+			lastPresentedWasGenerated = false
+			return PaceDecision.PRESENT_HELD_REAL
+		}
+		if(generationMode == GenerationMode.INTERPOLATE && frameGenerationEnabled)
+			return decideInterpolate(nowNs, newFrameAvailable)
 		val canGenerate = frameGenerationEnabled && realFramesSeen >= 2 && !lastPresentedWasGenerated
 		if(newFrameAvailable && canGenerate && (nowNs - lastRealNs) < holdThresholdNs)
 		{
@@ -77,10 +104,28 @@ class FramePacer(private val streamIntervalNs: Long, @Volatile var frameGenerati
 		return PaceDecision.SKIP
 	}
 
+	private fun decideInterpolate(nowNs: Long, newFrameAvailable: Boolean): PaceDecision
+	{
+		if(!newFrameAvailable)
+			return PaceDecision.SKIP
+		val stalled = lastRealNs != Long.MIN_VALUE && nowNs - lastRealNs >= maxRealAgeNs
+		realFramesSeen = if(stalled) 1 else realFramesSeen + 1
+		lastRealNs = nowNs
+		if(realFramesSeen >= 2)
+		{
+			heldPending = true
+			lastPresentedWasGenerated = true
+			return PaceDecision.PRESENT_INTERPOLATED
+		}
+		lastPresentedWasGenerated = false
+		return PaceDecision.PRESENT_REAL
+	}
+
 	fun reset()
 	{
 		realFramesSeen = 0L
 		lastRealNs = Long.MIN_VALUE
 		lastPresentedWasGenerated = false
+		heldPending = false
 	}
 }

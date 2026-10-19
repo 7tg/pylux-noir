@@ -75,6 +75,7 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 		preferences.fpsKey -> preferences.fps.value
 		preferences.bitrateKey -> preferences.bitrate?.toString() ?: ""
 		preferences.codecKey -> preferences.codec.value
+		preferences.frameGenerationModeKey -> preferences.frameGenerationMode.value
 		preferences.cloudDatacenterPsnowKey -> preferences.getCloudDatacenterPsnow()
 		preferences.cloudDatacenterPscloudKey -> preferences.getCloudDatacenterPscloud()
 		preferences.cloudLanguageKey -> preferences.getCloudGameLanguage()
@@ -111,6 +112,11 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 			{
 				val codec = Preferences.Codec.values().firstOrNull { it.value == value } ?: return
 				preferences.codec = codec
+			}
+			preferences.frameGenerationModeKey ->
+			{
+				val mode = Preferences.FrameGenerationMode.values().firstOrNull { it.value == value } ?: return
+				preferences.frameGenerationMode = mode
 			}
 			preferences.cloudDatacenterPsnowKey -> preferences.setCloudDatacenterPsnow(value ?: "Auto")
 			preferences.cloudDatacenterPscloudKey -> preferences.setCloudDatacenterPscloud(value ?: "Auto")
@@ -234,6 +240,16 @@ class SettingsFragment: PreferenceFragmentCompat(), TitleFragment
 				it.isEnabled = false
 				it.summary = getString(R.string.preferences_frame_generation_unsupported_summary)
 				preferenceScreen.findPreference<SeekBarPreference>(getString(R.string.preferences_frame_generation_scale_key))?.isEnabled = false
+			}
+		}
+		preferenceScreen.findPreference<ListPreference>(getString(R.string.preferences_frame_generation_mode_key))?.let {
+			it.entryValues = Preferences.frameGenerationModeAll.map { mode -> mode.value }.toTypedArray()
+			it.entries = Preferences.frameGenerationModeAll.map { mode -> getString(mode.title) }.toTypedArray()
+			if(!AdrenoExt.isMotionEstimationSupported())
+			{
+				it.isEnabled = false
+				it.summaryProvider = null
+				it.summary = getString(R.string.preferences_frame_generation_mode_unsupported_summary)
 			}
 		}
 		bindGpuTuningPreferences()

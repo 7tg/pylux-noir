@@ -158,6 +158,12 @@
             app:defaultValue="true"
             app:icon="@drawable/ic_fps"/>
 
+        <ListPreference
+            app:key="@string/preferences_frame_generation_mode_key"
+            app:title="@string/preferences_frame_generation_mode_title"
+            app:useSimpleSummaryProvider="true"
+            app:icon="@drawable/ic_fps"/>
+
         <SeekBarPreference
             app:key="@string/preferences_frame_generation_scale_key"
             app:title="@string/preferences_frame_generation_scale_title"

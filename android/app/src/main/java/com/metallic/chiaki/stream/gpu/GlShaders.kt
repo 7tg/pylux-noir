@@ -76,6 +76,60 @@ void main()
 }
 """
 
+	/**
+	 * Luma of a ring slot into a padded R8 texture for the motion estimator. The target may be larger
+	 * than the stream (rounded up to the search block); `uScale` = stream / padded size, so the frame
+	 * stays 1:1 and the padding replicates the edge through CLAMP_TO_EDGE.
+	 */
+	internal const val LUMA_FRAG_SRC = """#version 310 es
+precision mediump float;
+uniform mediump sampler2D ps0;
+uniform highp vec2 uScale;
+in highp vec4 in_TEXCOORD0;
+out vec4 fragColor;
+void main()
+{
+	highp vec2 uv = in_TEXCOORD0.xy / uScale;
+	float y = dot(texture(ps0, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
+	fragColor = vec4(y, 0.0, 0.0, 1.0);
+}
+"""
+
+	/**
+	 * Midpoint interpolation between the older frame A and the newer frame B from two block motion
+	 * fields (A→B and B→A, in pixels, sampled bilinearly). Each field gives one candidate: the pair of
+	 * samples half a step back and forward along its vector; the candidate whose pair agrees better
+	 * (smaller luma difference, i.e. not an occlusion) gets the larger weight.
+	 */
+	internal const val WARP_FRAG_SRC = """#version 310 es
+precision highp float;
+uniform mediump sampler2D uTexA;
+uniform mediump sampler2D uTexB;
+uniform mediump sampler2D uMvAB;
+uniform mediump sampler2D uMvBA;
+uniform highp vec2 uTexel;
+uniform highp vec2 uMvUvScale;
+in highp vec4 in_TEXCOORD0;
+out vec4 fragColor;
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+void main()
+{
+	vec2 uv = in_TEXCOORD0.xy;
+	vec2 mvUv = uv * uMvUvScale;
+	vec2 vAB = texture(uMvAB, mvUv).xy * uTexel;
+	vec2 vBA = texture(uMvBA, mvUv).xy * uTexel;
+	vec3 a1 = texture(uTexA, uv - 0.5 * vAB).rgb;
+	vec3 b1 = texture(uTexB, uv + 0.5 * vAB).rgb;
+	vec3 b2 = texture(uTexB, uv - 0.5 * vBA).rgb;
+	vec3 a2 = texture(uTexA, uv + 0.5 * vBA).rgb;
+	float w1 = 1.0 / (abs(luma(a1) - luma(b1)) + 0.002);
+	float w2 = 1.0 / (abs(luma(a2) - luma(b2)) + 0.002);
+	vec3 m1 = 0.5 * (a1 + b1);
+	vec3 m2 = 0.5 * (a2 + b2);
+	fragColor = vec4((m1 * w1 + m2 * w2) / (w1 + w2), 1.0);
+}
+"""
+
 	private val SGSR1_PATCHES = listOf(
 		"#version 300 es" to "#version 310 es",
 		"layout(location=0) in highp vec4 in_TEXCOORD0;" to "in highp vec4 in_TEXCOORD0;",
@@ -131,6 +185,8 @@ void main()
 	fun buildOesCopyProgram(hdr: Boolean = false): Int =
 		if(hdr) link(VERTEX_SRC, OES_COPY_HDR_FRAG_SRC, "oes-copy-hdr") else link(VERTEX_SRC, OES_COPY_FRAG_SRC, "oes-copy")
 	fun buildBlitProgram(): Int = link(VERTEX_SRC, BLIT_FRAG_SRC, "blit")
+	fun buildLumaProgram(): Int = link(VERTEX_SRC, LUMA_FRAG_SRC, "luma")
+	fun buildWarpProgram(): Int = link(VERTEX_SRC, WARP_FRAG_SRC, "warp")
 	fun buildSgsr1Program(assets: AssetManager, edgeSharpness: Float = SGSR1_DEFAULT_EDGE_SHARPNESS,
 		edgeThreshold255: Int = SGSR1_DEFAULT_EDGE_THRESHOLD_255, edgeDirection: Boolean = false): Int =
 		link(VERTEX_SRC, loadSgsr1Source(assets, edgeSharpness, edgeThreshold255, edgeDirection),

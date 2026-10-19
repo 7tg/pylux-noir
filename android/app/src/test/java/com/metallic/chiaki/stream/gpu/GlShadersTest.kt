@@ -125,6 +125,8 @@ class GlShadersTest
 				"oes" to GlShaders.OES_COPY_FRAG_SRC,
 				"oes-hdr" to GlShaders.OES_COPY_HDR_FRAG_SRC,
 				"blit" to GlShaders.BLIT_FRAG_SRC,
+				"luma" to GlShaders.LUMA_FRAG_SRC,
+				"warp" to GlShaders.WARP_FRAG_SRC,
 				"sgsr1" to GlShaders.patchSgsr1Source(raw),
 				"sgsr1-tuned" to GlShaders.patchSgsr1Source(raw, edgeSharpness = 0.5f, edgeThreshold255 = 32),
 				"sgsr1-edge-off" to GlShaders.patchSgsr1Source(rawEdge),
