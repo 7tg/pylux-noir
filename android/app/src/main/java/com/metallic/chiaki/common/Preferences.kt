@@ -56,6 +56,18 @@ class Preferences(context: Context)
 		const val CLOUD_BITRATE_MAX_KBPS = 200000
 		const val CLOUD_BITRATE_DEFAULT_KBPS = 20000
 
+		// GPU tuning, stored as integers for SeekBarPreference: sharpness in tenths, edge threshold in
+		// 1/255 units (both SGSR1 shader defaults), extrapolation distance in percent of a frame interval.
+		const val SGSR_SHARPNESS_MIN = 5
+		const val SGSR_SHARPNESS_MAX = 50
+		const val SGSR_SHARPNESS_DEFAULT = 20
+		const val SGSR_EDGE_THRESHOLD_MIN = 1
+		const val SGSR_EDGE_THRESHOLD_MAX = 32
+		const val SGSR_EDGE_THRESHOLD_DEFAULT = 8
+		const val FRAME_GENERATION_SCALE_MIN = 10
+		const val FRAME_GENERATION_SCALE_MAX = 100
+		const val FRAME_GENERATION_SCALE_DEFAULT = 50
+
 		const val DPAD_TOUCH_INCREMENT_MIN = 1
 		const val DPAD_TOUCH_INCREMENT_MAX = 1079
 		const val DPAD_TOUCH_INCREMENT_DEFAULT = 30
@@ -170,6 +182,21 @@ class Preferences(context: Context)
 	var preferHighRefresh
 		get() = sharedPreferences.getBoolean(preferHighRefreshKey, true)
 		set(value) { sharedPreferences.edit().putBoolean(preferHighRefreshKey, value).apply() }
+
+	val sgsrSharpnessKey get() = resources.getString(R.string.preferences_sgsr_sharpness_key)
+	var sgsrSharpness
+		get() = sharedPreferences.getInt(sgsrSharpnessKey, SGSR_SHARPNESS_DEFAULT).coerceIn(SGSR_SHARPNESS_MIN, SGSR_SHARPNESS_MAX)
+		set(value) { sharedPreferences.edit().putInt(sgsrSharpnessKey, value.coerceIn(SGSR_SHARPNESS_MIN, SGSR_SHARPNESS_MAX)).apply() }
+
+	val sgsrEdgeThresholdKey get() = resources.getString(R.string.preferences_sgsr_edge_threshold_key)
+	var sgsrEdgeThreshold
+		get() = sharedPreferences.getInt(sgsrEdgeThresholdKey, SGSR_EDGE_THRESHOLD_DEFAULT).coerceIn(SGSR_EDGE_THRESHOLD_MIN, SGSR_EDGE_THRESHOLD_MAX)
+		set(value) { sharedPreferences.edit().putInt(sgsrEdgeThresholdKey, value.coerceIn(SGSR_EDGE_THRESHOLD_MIN, SGSR_EDGE_THRESHOLD_MAX)).apply() }
+
+	val frameGenerationScaleKey get() = resources.getString(R.string.preferences_frame_generation_scale_key)
+	var frameGenerationScale
+		get() = sharedPreferences.getInt(frameGenerationScaleKey, FRAME_GENERATION_SCALE_DEFAULT).coerceIn(FRAME_GENERATION_SCALE_MIN, FRAME_GENERATION_SCALE_MAX)
+		set(value) { sharedPreferences.edit().putInt(frameGenerationScaleKey, value.coerceIn(FRAME_GENERATION_SCALE_MIN, FRAME_GENERATION_SCALE_MAX)).apply() }
 
 	/** Whether the in-stream performance stats overlay is toggled on (per-session UI state). */
 	private val STREAM_STATS_OVERLAY_KEY = "stream_stats_overlay_enabled"

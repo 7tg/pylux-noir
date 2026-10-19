@@ -10,6 +10,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.metallic.chiaki.common.LogManager
 import com.metallic.chiaki.lib.*
+import com.metallic.chiaki.stream.gpu.GpuTuning
 import com.metallic.chiaki.stream.gpu.GpuVideoRenderer
 
 sealed class StreamState
@@ -21,7 +22,7 @@ data class StreamStateQuit(val reason: QuitReason, val reasonString: String?): S
 data class StreamStateLoginPinRequest(val pinIncorrect: Boolean): StreamState()
 
 /** Which GPU features the session should use; null means the direct MediaCodec→SurfaceView path. */
-data class GpuPipelineConfig(val upscaling: Boolean, val frameGeneration: Boolean)
+data class GpuPipelineConfig(val upscaling: Boolean, val frameGeneration: Boolean, val tuning: GpuTuning = GpuTuning())
 {
 	val enabled get() = upscaling || frameGeneration
 }
@@ -323,7 +324,7 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 			val vp = connectInfo.videoProfile
 			// Native forces H264 on PS4, so HDR can only be in effect on a PS5 session.
 			val hdr = connectInfo.ps5 && vp.codec == Codec.CODEC_H265_HDR
-			val candidate = GpuVideoRenderer(assets, vp.width, vp.height, vp.maxFPS, cfg.upscaling, cfg.frameGeneration, hdr)
+			val candidate = GpuVideoRenderer(assets, vp.width, vp.height, vp.maxFPS, cfg.upscaling, cfg.frameGeneration, hdr, cfg.tuning)
 			if(candidate.start())
 				renderer = candidate
 			else

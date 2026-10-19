@@ -23,6 +23,16 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
+ * User tuning for the GPU path. [extrapolationScale] is the glExtrapolateTex2DQCOM scale factor:
+ * how far past the newest real frame the generated frame targets, in frame intervals (0.5 = the
+ * midpoint between two 60 fps frames, which is where a 120 Hz vsync falls).
+ */
+data class GpuTuning(
+	val sgsrEdgeSharpness: Float = GlShaders.SGSR1_DEFAULT_EDGE_SHARPNESS,
+	val sgsrEdgeThreshold255: Int = GlShaders.SGSR1_DEFAULT_EDGE_THRESHOLD_255,
+	val extrapolationScale: Float = 0.5f)
+
+/**
  * GPU video path: MediaCodec decodes into [inputSurface]; every display vsync this thread
  * presents either the newest decoded frame or a hardware-extrapolated one, upscaled with
  * SGSR1 (or a plain blit) onto the SurfaceView's surface.
@@ -44,13 +54,13 @@ class GpuVideoRenderer(
 	streamFps: Int,
 	private val upscalingRequested: Boolean,
 	private val frameGenerationRequested: Boolean,
-	private val hdr: Boolean = false
+	private val hdr: Boolean = false,
+	private val tuning: GpuTuning = GpuTuning()
 )
 {
 	companion object
 	{
 		private const val TAG = "GpuVideoRenderer"
-		private const val EXTRAPOLATION_SCALE = 0.5f
 		private const val STATS_WINDOW_NS = 1_000_000_000L
 		private const val SURFACE_TEARDOWN_TIMEOUT_MS = 500L
 		// EGL_KHR_gl_colorspace and EGL_EXT_gl_colorspace_bt2020_pq; android.opengl exposes neither constant.
@@ -270,7 +280,7 @@ class GpuVideoRenderer(
 		{
 			try
 			{
-				val program = GlShaders.buildSgsr1Program(assets)
+				val program = GlShaders.buildSgsr1Program(assets, tuning.sgsrEdgeSharpness, tuning.sgsrEdgeThreshold255)
 				presentIsSgsr = true
 				program
 			}
@@ -327,7 +337,7 @@ class GpuVideoRenderer(
 
 		frameGenerationActive = frameGenerationRequested && AdrenoExt.nativeProbeFrameExtrapolation()
 		pacer.frameGenerationEnabled = frameGenerationActive
-		Log.i(TAG, "frame extrapolation supported=$frameGenerationActive requested=$frameGenerationRequested")
+		Log.i(TAG, "frame extrapolation supported=$frameGenerationActive requested=$frameGenerationRequested, tuning=$tuning")
 
 		val st = SurfaceTexture(oesTexture)
 		st.setDefaultBufferSize(streamWidth, streamHeight)
@@ -408,7 +418,7 @@ class GpuVideoRenderer(
 				// bookkeeping is the same either way.
 				if(windowSurface != EGL14.EGL_NO_SURFACE)
 				{
-					AdrenoExt.nativeExtrapolateTex2D(ring[1 - newestSlot], ring[newestSlot], generatedTexture, EXTRAPOLATION_SCALE)
+					AdrenoExt.nativeExtrapolateTex2D(ring[1 - newestSlot], ring[newestSlot], generatedTexture, tuning.extrapolationScale)
 					checkGlError("extrapolate")
 					if(present(generatedTexture))
 						generatedInWindow++

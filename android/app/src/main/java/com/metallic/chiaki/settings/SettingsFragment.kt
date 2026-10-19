@@ -131,6 +131,9 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 		preferences.cloudBitratePsnowKey -> preferences.getCloudBitratePsnow() / 1000
 		preferences.dpadTouchIncrementKey -> preferences.dpadTouchIncrement
 		preferences.rumbleIntensityKey -> preferences.rumbleIntensity
+		preferences.sgsrSharpnessKey -> preferences.sgsrSharpness
+		preferences.sgsrEdgeThresholdKey -> preferences.sgsrEdgeThreshold
+		preferences.frameGenerationScaleKey -> preferences.frameGenerationScale
 		else -> defValue
 	}
 
@@ -142,6 +145,9 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 			preferences.cloudBitratePsnowKey -> preferences.setCloudBitratePsnow(value * 1000)
 			preferences.dpadTouchIncrementKey -> preferences.dpadTouchIncrement = value
 			preferences.rumbleIntensityKey -> preferences.rumbleIntensity = value
+			preferences.sgsrSharpnessKey -> preferences.sgsrSharpness = value
+			preferences.sgsrEdgeThresholdKey -> preferences.sgsrEdgeThreshold = value
+			preferences.frameGenerationScaleKey -> preferences.frameGenerationScale = value
 		}
 	}
 
@@ -225,8 +231,10 @@ class SettingsFragment: PreferenceFragmentCompat(), TitleFragment
 			{
 				it.isEnabled = false
 				it.summary = getString(R.string.preferences_frame_generation_unsupported_summary)
+				preferenceScreen.findPreference<SeekBarPreference>(getString(R.string.preferences_frame_generation_scale_key))?.isEnabled = false
 			}
 		}
+		bindGpuTuningPreferences()
 
 		// Populate cloud datacenter dropdowns dynamically from saved ping results
 		populateCloudDatacenterPreference(
@@ -451,6 +459,23 @@ class SettingsFragment: PreferenceFragmentCompat(), TitleFragment
 		preference.summaryProvider = Preference.SummaryProvider<SeekBarPreference> { pref ->
 			getString(summaryRes, pref.value)
 		}
+	}
+
+	/** Summaries for the GPU tuning sliders show the real value the renderer will use, not the stored integer. */
+	private fun bindGpuTuningPreferences()
+	{
+		preferenceScreen.findPreference<SeekBarPreference>(getString(R.string.preferences_sgsr_sharpness_key))?.summaryProvider =
+			Preference.SummaryProvider<SeekBarPreference> { pref ->
+				getString(R.string.preferences_sgsr_sharpness_summary, String.format(Locale.US, "%.1f", pref.value / 10f))
+			}
+		preferenceScreen.findPreference<SeekBarPreference>(getString(R.string.preferences_sgsr_edge_threshold_key))?.summaryProvider =
+			Preference.SummaryProvider<SeekBarPreference> { pref ->
+				getString(R.string.preferences_sgsr_edge_threshold_summary, pref.value)
+			}
+		preferenceScreen.findPreference<SeekBarPreference>(getString(R.string.preferences_frame_generation_scale_key))?.summaryProvider =
+			Preference.SummaryProvider<SeekBarPreference> { pref ->
+				getString(R.string.preferences_frame_generation_scale_summary, String.format(Locale.US, "%.2f", pref.value / 100f))
+			}
 	}
 
 	private fun bindDpadTouchIncrementPreference(preference: SeekBarPreference?)
