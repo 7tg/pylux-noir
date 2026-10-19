@@ -26,6 +26,7 @@ import com.metallic.chiaki.common.ext.viewModelFactory
 import com.metallic.chiaki.common.getDatabase
 import com.metallic.chiaki.common.importSettingsFromUri
 import com.metallic.chiaki.discovery.PsnDiscoveryManager
+import com.metallic.chiaki.stream.gpu.AdrenoExt
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.rxkotlin.addTo
 import kotlinx.coroutines.launch
@@ -220,7 +221,7 @@ class SettingsFragment: PreferenceFragmentCompat(), TitleFragment
 		}
 
 		preferenceScreen.findPreference<SwitchPreference>(getString(R.string.preferences_frame_generation_enabled_key))?.let {
-			if(!com.metallic.chiaki.stream.gpu.AdrenoExt.isFrameExtrapolationSupported())
+			if(!AdrenoExt.isFrameExtrapolationSupported())
 			{
 				it.isEnabled = false
 				it.summary = getString(R.string.preferences_frame_generation_unsupported_summary)
