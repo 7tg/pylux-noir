@@ -9,6 +9,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.metallic.chiaki.common.LogManager
 import com.metallic.chiaki.lib.*
+import com.metallic.chiaki.stream.gpu.GpuVideoRenderer
 
 sealed class StreamState
 object StreamStateIdle: StreamState()
@@ -18,7 +19,14 @@ data class StreamStateCreateError(val error: CreateError): StreamState()
 data class StreamStateQuit(val reason: QuitReason, val reasonString: String?): StreamState()
 data class StreamStateLoginPinRequest(val pinIncorrect: Boolean): StreamState()
 
-class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, val logVerbose: Boolean, val input: StreamInput)
+/** Which GPU features the session should use; null means the direct MediaCodec→SurfaceView path. */
+data class GpuPipelineConfig(val upscaling: Boolean, val frameGeneration: Boolean)
+{
+	val enabled get() = upscaling || frameGeneration
+}
+
+class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, val logVerbose: Boolean, val input: StreamInput,
+	private val assets: android.content.res.AssetManager, private val gpuConfig: GpuPipelineConfig?)
 {
 	var session: Session? = null
 		private set
@@ -33,6 +41,11 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 
 	private var surfaceTexture: SurfaceTexture? = null
 	private var surface: Surface? = null
+	private var surfaceWidth = 0
+	private var surfaceHeight = 0
+	@Volatile private var gpuRenderer: GpuVideoRenderer? = null
+	/** Non-null while the GPU path is active for the current session. */
+	val gpuStats get() = gpuRenderer?.stats()
 
 	/** Holepunch session for PSN connections (kept alive for session lifetime) */
 	private var holepunchSession: HolepunchSession? = null
@@ -58,6 +71,8 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 		{
 			val sessionToDispose = session
 			session?.stop()
+			gpuRenderer?.release()
+			gpuRenderer = null
 			// Move blocking dispose() call to background thread to prevent ANR
 			// (dispose can block for 10+ seconds on network timeouts during holepunch cleanup)
 			Thread {
@@ -69,6 +84,9 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 		}
 		else
 		{
+			// Defensive: the renderer is only created once a session exists, so this is normally null.
+			gpuRenderer?.release()
+			gpuRenderer = null
 			val hpSessionToFini = holepunchSession
 			// Move blocking fini() call to background thread to prevent ANR
 			Thread {
@@ -190,9 +208,7 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 				session.eventCallback = this::eventCallback
 				session.setPsChord(true) // always on: safe, no user toggle
 				session.start()
-				val surface = surface
-				if(surface != null)
-					session.setSurface(surface)
+				attachVideoOutput(session)
 				this.session = session
 			}
 			catch(e: CreateError)
@@ -224,9 +240,7 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 				session.eventCallback = this::eventCallback
 				session.setPsChord(true) // always on: safe, no user toggle
 				session.start()
-				val surface = surface
-				if(surface != null)
-					session.setSurface(surface)
+				attachVideoOutput(session)
 				this.session = session
 			}
 			catch(e: CreateError)
@@ -234,6 +248,32 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 				_state.postValue(StreamStateCreateError(e))
 			}
 		}.start()
+	}
+
+	/**
+	 * Points the native decoder at either the GPU renderer's input surface or the
+	 * SurfaceView directly. Falls back to the direct path if the renderer cannot start.
+	 */
+	private fun attachVideoOutput(session: Session)
+	{
+		val cfg = gpuConfig
+		if(cfg != null && cfg.enabled)
+		{
+			val vp = connectInfo.videoProfile
+			val renderer = GpuVideoRenderer(assets, vp.width, vp.height, vp.maxFPS, cfg.upscaling, cfg.frameGeneration)
+			if(renderer.start())
+			{
+				gpuRenderer = renderer
+				renderer.setOutputSurface(surface, surfaceWidth, surfaceHeight)
+				session.setSurface(renderer.inputSurface)
+				Log.i("StreamSession", "video output: GPU path (upscale=${cfg.upscaling}, framegen=${cfg.frameGeneration})")
+				return
+			}
+			Log.w("StreamSession", "video output: GPU path unavailable, using direct path")
+		}
+		val s = surface
+		if(s != null)
+			session.setSurface(s)
 	}
 
 	private fun hexStringToBytes(hex: String): ByteArray
@@ -284,24 +324,38 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 
 			override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int)
 			{
-				Log.i("StreamSession", "surfaceChanged: ${width}x${height}, session=${session != null}")
+				Log.i("StreamSession", "surfaceChanged: ${width}x${height}, session=${session != null}, gpu=${gpuRenderer != null}")
 				val surface = holder.surface
 				this@StreamSession.surface = surface
-				session?.setSurface(surface)
-				Log.i("StreamSession", "surfaceChanged: setSurface done")
+				surfaceWidth = width
+				surfaceHeight = height
+				val renderer = gpuRenderer
+				if(renderer != null)
+					renderer.setOutputSurface(surface, width, height)
+				else
+					session?.setSurface(surface)
+				Log.i("StreamSession", "surfaceChanged: done")
 			}
 
 			override fun surfaceDestroyed(holder: SurfaceHolder)
 			{
-				Log.i("StreamSession", "surfaceDestroyed: session=${session != null}, skipNativeCleanup=$skipNativeSurfaceCleanup")
+				Log.i("StreamSession", "surfaceDestroyed: session=${session != null}, gpu=${gpuRenderer != null}, skipNativeCleanup=$skipNativeSurfaceCleanup")
 				this@StreamSession.surface = null
-				if (!skipNativeSurfaceCleanup)
+				val renderer = gpuRenderer
+				if(renderer != null)
 				{
-					// Normal cleanup - session is being shut down or activity is finishing
+					// GPU path: the decoder keeps writing to the SurfaceTexture; only the EGL
+					// window goes away. This call blocks until the render thread has stopped
+					// drawing to the surface, as the SurfaceHolder contract requires.
+					renderer.setOutputSurface(null, 0, 0)
+				}
+				else if(!skipNativeSurfaceCleanup)
+				{
+					// Direct path, normal cleanup - session is being shut down or activity is finishing
 					session?.setSurface(null)
 					Log.i("StreamSession", "surfaceDestroyed: setSurface(null) done")
 				}
-				// When skipNativeSurfaceCleanup is true (PiP transition), don't call
+				// Direct path with skipNativeSurfaceCleanup (PiP transition): don't call
 				// setSurface(null) - it blocks the native decoder. The new surface
 				// will be provided via surfaceChanged shortly after.
 			}
