@@ -62,7 +62,8 @@ android {
     ndkVersion "28.2.13676358" // NDK r28.2 - provides 16KB alignment by default
     
     defaultConfig {
-        applicationId "com.pylux.stream"
+        applicationId "com.pylux.stream.noir"
+        buildConfigField "boolean", "INTEGRITY_CHECK", "false"
         minSdk 24
         targetSdk 35
         versionCode androidVersionCode
@@ -71,7 +72,7 @@ android {
             // For local development: arm64-v8a only
             // For production builds: include all ABIs (armeabi-v7a, arm64-v8a, x86, x86_64)
             // The build script can override this with -Pandroid.injected.build.abi
-            abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"
+            abiFilters "arm64-v8a"
         }
         externalNativeBuild {
             cmake {

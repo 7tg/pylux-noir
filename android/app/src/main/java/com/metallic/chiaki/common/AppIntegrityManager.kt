@@ -32,10 +32,10 @@ class AppIntegrityManager(private val context: Context)
 	 */
 	fun validateAppState(activity: Activity, onResult: (Boolean) -> Unit)
 	{
-		// Skip validation in debug builds
-		if (BuildConfig.DEBUG)
+		// Skip validation in debug builds and in forks without Play distribution
+		if (BuildConfig.DEBUG || !BuildConfig.INTEGRITY_CHECK)
 		{
-			Log.w(TAG, "=== DEBUG BUILD: Validation bypassed ===")
+			Log.w(TAG, "=== Integrity validation bypassed (debug=${BuildConfig.DEBUG}, check=${BuildConfig.INTEGRITY_CHECK}) ===")
 			onResult(true)
 			return
 		}
