@@ -156,7 +156,8 @@ negative result as "generation off".
 | Failure | Behaviour |
 |---------|-----------|
 | EGL init, context, or window surface creation fails | Log cause; `StreamSession` falls back to the direct path for this session (passes the SurfaceView surface to native `setSurface`). |
-| Shader compile/link fails | Same fallback as above (logged with the GL info log). |
+| OES copy or blit shader compile/link fails | Same fallback as above (logged with the GL info log). |
+| SGSR1 shader compile/link fails | Upscaling degrades to a bilinear blit; frame generation unaffected (logged). |
 | Extension missing or `eglGetProcAddress` null | Frame generation off, upscaling on. Logged once. |
 | `glGetError` after a pass | Logged once per error code per session; rendering continues. |
 | `updateTexImage` throws (surface abandoned) | Treated as session end; renderer stops drawing. |
@@ -190,6 +191,8 @@ stream (same as resolution/fps today).
 | App name | "Pylux Noir" so both installs are distinguishable |
 
 ## Testing
+
+The user's stream settings, used for every on-device check: 1080p, 60 fps, 50000 kbps.
 
 Unit (JUnit, no device):
 - `FramePacerTest`: real frame wins over generation; generation only after two real
