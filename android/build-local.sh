@@ -13,9 +13,9 @@
 # ==========================================================================================
 #
 # Build modes:
-#   ./android/build-local.sh              # release AAB (CI parity, all ABIs)
+#   ./android/build-local.sh              # release AAB (arm64-v8a only in this fork)
 #   ./android/build-local.sh --quick      # debug APK, arm64-v8a only (fast)
-#   ./android/build-local.sh --full       # clean + rebuild all native ABIs (after lib/ changes)
+#   ./android/build-local.sh --full       # clean + rebuild native libs (after lib/ changes)
 #   ./android/build-local.sh --install    # install + launch APK on connected device after build
 #   ./android/build-local.sh --skip-deps  # skip SDK/JDK dependency installs
 # Logs:
@@ -425,7 +425,7 @@ main() {
   write_local_properties "$ANDROID_SDK_ROOT"
 
   if [[ "$FULL_REBUILD" == true ]]; then
-    log "Full rebuild: clean + assembleDebug (all ABIs — required after lib/ changes)"
+    log "Full rebuild: clean + assembleDebug (required after lib/ changes)"
     run_gradle clean
     run_gradle assembleDebug
     apk="$(find_apk debug || true)"
@@ -438,7 +438,7 @@ main() {
     [[ -n "$apk" ]] || die "Debug APK not found after build"
     log "Built: $apk ($(du -h "$apk" | awk '{print $1}'))"
   else
-    log "Release build: bundleRelease (all ABIs — matches CI)"
+    log "Release build: bundleRelease (arm64-v8a only in this fork)"
     run_gradle bundleRelease
     aab="$(find_aab || true)"
     [[ -n "$aab" ]] || die "Release AAB not found after build"
@@ -452,7 +452,7 @@ main() {
     [[ -n "$apk" ]] || die "--install requires an APK; use --quick or assembleDebug"
     log "Installing $apk"
     "$adb_bin" install -r -t "$apk"
-    "$adb_bin" shell am start -n com.pylux.stream/com.metallic.chiaki.main.MainActivity
+    "$adb_bin" shell am start -n com.pylux.stream.noir/com.metallic.chiaki.main.MainActivity
     if [[ "$CAPTURE_LOGS" == true ]]; then
       start_log_capture "$adb_bin"
     fi
@@ -470,7 +470,7 @@ main() {
   echo "  Background capture file (--logs):  $LOG_DIR/pylux-latest.log   (read with: tail -n 200 <file>)"
   echo "  Stop background capture:           ./android/build-local.sh --stop-logs"
   echo "  Session file (device): files/session_logs/chiaki_session_*.log"
-  echo "  Pull session log:    adb shell run-as com.pylux.stream cat files/session_logs/\$(adb shell run-as com.pylux.stream ls -t files/session_logs/ | head -1)"
+  echo "  Pull session log:    adb shell run-as com.pylux.stream.noir cat files/session_logs/\$(adb shell run-as com.pylux.stream.noir ls -t files/session_logs/ | head -1)"
   if [[ -f "$LOG_DIR/capture.pid" ]]; then
     echo "  Capturing:  pid $(cat "$LOG_DIR/capture.pid") -> $(readlink "$LOG_DIR/pylux-latest.log" 2>/dev/null || echo pylux-latest.log)"
   fi

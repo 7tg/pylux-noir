@@ -69,9 +69,7 @@ android {
         versionCode androidVersionCode
         versionName chiakiVersion
         ndk {
-            // For local development: arm64-v8a only
-            // For production builds: include all ABIs (armeabi-v7a, arm64-v8a, x86, x86_64)
-            // The build script can override this with -Pandroid.injected.build.abi
+            // Fork builds arm64-v8a only (Tab S9)
             abiFilters "arm64-v8a"
         }
         externalNativeBuild {

@@ -135,7 +135,7 @@ class DonationPromptCoordinator private constructor(
 		fun forStream(activity: AppCompatActivity, viewModel: StreamViewModel) = DonationPromptCoordinator(
 			activity,
 			viewModel.preferences,
-			streamAutoOffer = true,
+			streamAutoOffer = com.pylux.stream.BuildConfig.INTEGRITY_CHECK, // no Play billing nag in the fork
 			onBillingDisconnected = null,
 			settingsAlwaysOpen = false,
 		)
