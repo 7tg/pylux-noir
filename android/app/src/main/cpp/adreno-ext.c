@@ -2,9 +2,10 @@
 //
 // JNI shim for the Qualcomm Adreno Frame Motion Engine, exposed to OpenGL ES as
 // GL_QCOM_frame_extrapolation (Khronos OpenGL ES extension #333). Both functions must be
-// called on a thread with an EGL/GLES 3.x context current (the GpuVideoRenderer thread).
+// called on a thread with an ES 3.x context current.
 
 #include <jni.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
@@ -18,7 +19,15 @@
 
 typedef void (GL_APIENTRYP PFNGLEXTRAPOLATETEX2DQCOMPROC)(GLuint src1, GLuint src2, GLuint output, GLfloat scaleFactor);
 
-static PFNGLEXTRAPOLATETEX2DQCOMPROC s_extrapolate = NULL;
+// The renderer must run the probe on its own context before calling nativeExtrapolateTex2D;
+// the settings-screen probe only informs the UI.
+static _Atomic(PFNGLEXTRAPOLATETEX2DQCOMPROC) s_extrapolate = NULL;
+
+static const char *renderer_name(void)
+{
+	const char *name = (const char *)glGetString(GL_RENDERER);
+	return name ? name : "?";
+}
 
 static int gl_has_extension(const char *name)
 {
@@ -43,18 +52,21 @@ JNIEXPORT jboolean JNICALL ADRENO_JNI(nativeProbeFrameExtrapolation)(JNIEnv *env
 	}
 	if(!gl_has_extension("GL_QCOM_frame_extrapolation"))
 	{
-		LOGI("GL_QCOM_frame_extrapolation not advertised by driver (renderer: %s)", (const char *)glGetString(GL_RENDERER));
+		atomic_store_explicit(&s_extrapolate, NULL, memory_order_release);
+		LOGI("GL_QCOM_frame_extrapolation not advertised by driver (renderer: %s)", renderer_name());
 		return JNI_FALSE;
 	}
-	s_extrapolate = (PFNGLEXTRAPOLATETEX2DQCOMPROC)eglGetProcAddress("glExtrapolateTex2DQCOM");
-	LOGI("GL_QCOM_frame_extrapolation supported=%d (renderer: %s)", s_extrapolate != NULL, (const char *)glGetString(GL_RENDERER));
-	return s_extrapolate != NULL ? JNI_TRUE : JNI_FALSE;
+	PFNGLEXTRAPOLATETEX2DQCOMPROC fn = (PFNGLEXTRAPOLATETEX2DQCOMPROC)eglGetProcAddress("glExtrapolateTex2DQCOM");
+	atomic_store_explicit(&s_extrapolate, fn, memory_order_release);
+	LOGI("GL_QCOM_frame_extrapolation supported=%d (renderer: %s)", fn != NULL, renderer_name());
+	return fn != NULL ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL ADRENO_JNI(nativeExtrapolateTex2D)(JNIEnv *env, jclass cls, jint src1, jint src2, jint output, jfloat scale)
 {
 	(void)env; (void)cls;
-	if(!s_extrapolate)
+	PFNGLEXTRAPOLATETEX2DQCOMPROC fn = atomic_load_explicit(&s_extrapolate, memory_order_acquire);
+	if(!fn)
 		return;
-	s_extrapolate((GLuint)src1, (GLuint)src2, (GLuint)output, scale);
+	fn((GLuint)src1, (GLuint)src2, (GLuint)output, scale);
 }
