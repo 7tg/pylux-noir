@@ -15,6 +15,7 @@ extern MunitTest tests_bitstream[];
 extern MunitTest tests_cloudcatalog_merge[];
 extern MunitTest tests_cloudsession_kamaji[];
 extern MunitTest tests_ps_chord[];
+extern MunitTest tests_haptics_rumble[];
 
 static MunitSuite suites[] = {
 	{
@@ -104,6 +105,13 @@ static MunitSuite suites[] = {
 	{
 		"/ps_chord",
 		tests_ps_chord,
+		NULL,
+		1,
+		MUNIT_SUITE_OPTION_NONE
+	},
+	{
+		"/haptics_rumble",
+		tests_haptics_rumble,
 		NULL,
 		1,
 		MUNIT_SUITE_OPTION_NONE

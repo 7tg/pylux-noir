@@ -18,7 +18,8 @@ add_executable(chiaki-unit
 		regist.c
 		cloudcatalog_merge.c
 		cloudsession_kamaji.c
-		pschord.c)
+		pschord.c
+		hapticsrumble.c)
 
 target_link_libraries(chiaki-unit chiaki-lib munit)
 if(TARGET PkgConfig::json-c)

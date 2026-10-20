@@ -249,7 +249,7 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 				val amplitude = (((it.left.toInt() + it.right.toInt()) / 2) * rumbleScale).toInt().coerceIn(0, 255)
 				// Cancel the PREVIOUS target too: when the target switches
 				// (controller connects/disconnects mid-rumble), cancelling only the
-				// new one would leave the old motor buzzing out its 1s one-shot.
+				// new one would leave the old motor buzzing out its one-shot.
 				if(lastVibrator !== vibrator)
 					lastVibrator?.cancel()
 				lastVibrator = vibrator
@@ -257,9 +257,9 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 				if(amplitude == 0)
 					return@Observer
 				if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-					vibrator.vibrate(VibrationEffect.createOneShot(1000, amplitude))
+					vibrator.vibrate(VibrationEffect.createOneShot(it.effectMs.toLong(), amplitude))
 				else
-					vibrator.vibrate(1000)
+					vibrator.vibrate(it.effectMs.toLong())
 			})
 		}
 	}

@@ -41,6 +41,8 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 		preferences.mapSelectToTouchpadKey -> preferences.mapSelectToTouchpad
 		preferences.dpadTouchEnabledKey -> preferences.dpadTouchEnabled
 		preferences.rumbleEnabledKey -> preferences.rumbleEnabled
+		preferences.smoothHapticRumbleKey -> preferences.smoothHapticRumble
+		preferences.dualShock4ModeKey -> preferences.dualShock4Mode
 		preferences.buttonHapticEnabledKey -> preferences.buttonHapticEnabled
 		preferences.gpuUpscalingEnabledKey -> preferences.gpuUpscalingEnabled
 		preferences.frameGenerationEnabledKey -> preferences.frameGenerationEnabled
@@ -59,6 +61,8 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 			preferences.mapSelectToTouchpadKey -> preferences.mapSelectToTouchpad = value
 			preferences.dpadTouchEnabledKey -> preferences.dpadTouchEnabled = value
 			preferences.rumbleEnabledKey -> preferences.rumbleEnabled = value
+			preferences.smoothHapticRumbleKey -> preferences.smoothHapticRumble = value
+			preferences.dualShock4ModeKey -> preferences.dualShock4Mode = value
 			preferences.buttonHapticEnabledKey -> preferences.buttonHapticEnabled = value
 			preferences.gpuUpscalingEnabledKey -> preferences.gpuUpscalingEnabled = value
 			preferences.frameGenerationEnabledKey -> preferences.frameGenerationEnabled = value

@@ -153,6 +153,10 @@
     <string name="preferences_rumble_enabled_summary">Rumble on the controller\'s motor when it has one, otherwise the phone</string>
     <string name="preferences_rumble_intensity_title">Rumble Intensity</string>
     <string name="preferences_rumble_intensity_summary">Rumble strength (100 = normal, 0 = off, up to 500)</string>
+    <string name="preferences_smooth_haptic_rumble_title">Smooth Haptic Rumble</string>
+    <string name="preferences_smooth_haptic_rumble_summary">PS5: filter DualSense haptics into rumble (skip light textures, follow the console\'s vibration intensity). Off = raw, stronger rumble</string>
+    <string name="preferences_dualshock4_mode_title">DualShock 4 Mode</string>
+    <string name="preferences_dualshock4_mode_summary">Present the controller as a DualShock 4 instead of a DualSense. PS4 and Cloud Play are unaffected; PS5 Remote Play gets no rumble</string>
     <string name="preferences_motion_source_title">Gyro / Motion</string>
     <string name="preferences_motion_source_summary">Motion sensors sent to the console for gyro aiming</string>
     <string name="preferences_button_haptic_enabled_title">Touch Haptics</string>
@@ -308,6 +312,8 @@
     <string name="preferences_touchpad_only_enabled_key">touchpad_only_enabled</string>
     <string name="preferences_rumble_enabled_key">rumble_enabled</string>
     <string name="preferences_rumble_intensity_key">rumble_intensity</string>
+    <string name="preferences_smooth_haptic_rumble_key">smooth_haptic_rumble</string>
+    <string name="preferences_dualshock4_mode_key">dualshock4_mode</string>
     <string name="preferences_motion_enabled_key">motion_enabled</string> <!-- legacy bool, migrated into motion_source -->
     <string name="preferences_motion_source_key">motion_source</string>
     <string name="preferences_button_haptic_enabled_key">button_haptic_enabled</string>

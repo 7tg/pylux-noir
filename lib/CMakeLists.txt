@@ -31,6 +31,7 @@ set(HEADER_FILES
 		include/chiaki/discoveryservice.h
 		include/chiaki/feedback.h
 		include/chiaki/feedbacksender.h
+		include/chiaki/hapticsrumble.h
 		include/chiaki/controller.h
 		include/chiaki/takionsendbuffer.h
 		include/chiaki/time.h
@@ -79,6 +80,7 @@ set(SOURCE_FILES
 		src/discoveryservice.c
 		src/feedback.c
 		src/feedbacksender.c
+		src/hapticsrumble.c
 		src/controller.c
 		src/takionsendbuffer.c
 		src/time.c

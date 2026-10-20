@@ -28,7 +28,8 @@ data class GpuPipelineConfig(val upscaling: Boolean, val frameGeneration: Boolea
 }
 
 class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, val logVerbose: Boolean, val input: StreamInput,
-	private val assets: AssetManager, private val gpuConfig: GpuPipelineConfig?)
+	private val assets: AssetManager, private val gpuConfig: GpuPipelineConfig?,
+	private val smoothHapticRumble: Boolean = true, private val dualShock4Mode: Boolean = false)
 {
 	@Volatile var session: Session? = null
 		private set
@@ -249,7 +250,7 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 				// The native session_init() will use this for the streaming connection
 				// (data hole punching happens inside the native session thread)
 				val psnConnectInfo = connectInfo.copy(holepunchSessionPtr = hpSession.getPtr())
-				val session = Session(psnConnectInfo, logManager.createNewFile().file.absolutePath, logVerbose)
+				val session = Session(psnConnectInfo, logManager.createNewFile().file.absolutePath, logVerbose, smoothHapticRumble, dualShock4Mode)
 				started = session
 				session.eventCallback = this::eventCallback
 				session.setPsChord(true) // always on: safe, no user toggle
@@ -295,7 +296,7 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 			try
 			{
 				val gen = generation
-				val session = Session(connectInfo, logManager.createNewFile().file.absolutePath, logVerbose)
+				val session = Session(connectInfo, logManager.createNewFile().file.absolutePath, logVerbose, smoothHapticRumble, dualShock4Mode)
 				started = session
 				session.eventCallback = this::eventCallback
 				session.setPsChord(true) // always on: safe, no user toggle

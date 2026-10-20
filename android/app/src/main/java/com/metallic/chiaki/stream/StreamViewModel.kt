@@ -26,7 +26,9 @@ class StreamViewModel(val application: Application, val connectInfo: ConnectInfo
 				sgsrEdgeThreshold255 = preferences.sgsrEdgeThreshold,
 				sgsrEdgeDirection = preferences.sgsrEdgeDirection,
 				generationMode = preferences.frameGenerationMode.mode,
-				extrapolationScale = preferences.frameGenerationScale / 100f)))
+				extrapolationScale = preferences.frameGenerationScale / 100f)),
+		smoothHapticRumble = preferences.smoothHapticRumble,
+		dualShock4Mode = preferences.dualShock4Mode)
 
 	private var _onScreenControlsEnabled = MutableLiveData<Boolean>(preferences.onScreenControlsEnabled)
 	val onScreenControlsEnabled: LiveData<Boolean> get() = _onScreenControlsEnabled

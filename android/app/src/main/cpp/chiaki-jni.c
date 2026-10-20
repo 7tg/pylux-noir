@@ -15,6 +15,7 @@
 #include <chiaki/cloudcatalog.h>
 #include <chiaki/cloudsession.h>
 #include <chiaki/orientation.h>
+#include <chiaki/hapticsrumble.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -289,9 +290,12 @@ typedef struct android_chiaki_session_t
 	AndroidChiakiOpusDecoder opus_decoder;
 	bool use_opus_decoder; // true for PSCloud, false for PSNow/Remote Play
 	void *audio_output;
-	uint8_t last_haptic_amp; // last haptic-audio-derived rumble amplitude emitted (throttle)
-	uint16_t haptic_same_amp_frames; // consecutive frames suppressed by the throttle
+	ChiakiHapticsRumble haptics_rumble; // haptic-audio -> rumble converter (raw or smooth)
 } AndroidChiakiSession;
+
+// How long Kotlin plays each rumble event. Classic rumble packets only arrive on
+// change, so the effect must outlast a sustained rumble.
+#define CLASSIC_RUMBLE_EFFECT_MS 1000
 
 static void android_chiaki_event_cb(ChiakiEvent *event, void *user)
 {
@@ -329,7 +333,8 @@ static void android_chiaki_event_cb(ChiakiEvent *event, void *user)
 			E->CallVoidMethod(env, session->java_session,
 							  session->java_session_event_rumble_meth,
 							  (jint)event->rumble.left,
-							  (jint)event->rumble.right);
+							  (jint)event->rumble.right,
+							  (jint)CLASSIC_RUMBLE_EFFECT_MS);
 			break;
 		case CHIAKI_EVENT_REGIST:
 		{
@@ -367,8 +372,11 @@ static void android_chiaki_event_cb(ChiakiEvent *event, void *user)
 			E->CallVoidMethod(env, session->java_session,
 							  session->java_session_event_ps_chord_meth);
 			break;
-		case CHIAKI_EVENT_TRIGGER_EFFECTS:
 		case CHIAKI_EVENT_HAPTIC_INTENSITY:
+			// The console's vibration intensity setting; applied by the smooth converter
+			chiaki_haptics_rumble_set_intensity(&session->haptics_rumble, event->intensity);
+			break;
+		case CHIAKI_EVENT_TRIGGER_EFFECTS:
 		case CHIAKI_EVENT_TRIGGER_INTENSITY:
 		case CHIAKI_EVENT_LED_COLOR:
 		case CHIAKI_EVENT_PLAYER_INDEX:
@@ -390,48 +398,28 @@ static void android_chiaki_event_cb(ChiakiEvent *event, void *user)
 
 // With enable_dualsense=true a PS5 streams rumble as DualSense haptic-audio PCM
 // (interleaved stereo int16) rather than classic rumble packets. Android can't play
-// rich body haptics, so -- like Qt and iOS -- collapse each frame to a single motor
-// amplitude and re-emit it through the normal rumble path (android_chiaki_event_cb ->
-// eventRumble -> vibrator). Throttled to amplitude changes so we don't churn the JVM.
+// rich body haptics, so the shared converter (chiaki/hapticsrumble.h) collapses the
+// audio to a single motor amplitude, re-emitted through the normal rumble path
+// (android_chiaki_event_cb -> eventRumble -> vibrator). Raw or smooth per the
+// "Smooth haptic rumble" setting.
 static void android_chiaki_haptics_frame_cb(uint8_t *buf, size_t buf_size, void *user)
 {
 	AndroidChiakiSession *session = user;
-	if(!buf)
+	uint8_t amp;
+	if(!chiaki_haptics_rumble_feed(&session->haptics_rumble, buf, buf_size, &amp))
 		return;
-	const size_t sample_size = 2 * sizeof(int16_t); // interleaved stereo int16
-	size_t n = buf_size / sample_size;
-	if(n == 0)
+	JNIEnv *env = attach_thread_jni();
+	if(!env)
 		return;
-	uint64_t sum = 0;
-	for(size_t i = 0; i < n; i++)
-	{
-		int16_t l = 0, r = 0;
-		memcpy(&l, buf + i * sample_size, sizeof(int16_t));
-		memcpy(&r, buf + i * sample_size + sizeof(int16_t), sizeof(int16_t));
-		int al = l < 0 ? -l : l, ar = r < 0 ? -r : r;
-		sum += (uint64_t)(al > ar ? al : ar);
-	}
-	uint32_t avg = (uint32_t)(sum / n); // 0..32767
-	uint8_t amp = avg >= 32767 ? 255 : (uint8_t)((avg * 255) / 32767);
-	// Only emit on change -- but the consumer plays a FINITE (1s) effect, so a
-	// constant non-zero amplitude sustained past that would go silent. Let equal
-	// amplitudes through periodically to re-arm the effect (~every 0.5s at the
-	// ~100 frames/s haptic rate).
-	if(amp == session->last_haptic_amp)
-	{
-		if(amp == 0 || ++session->haptic_same_amp_frames < 50)
-			return;
-	}
-	session->haptic_same_amp_frames = 0;
-	session->last_haptic_amp = amp;
-	ChiakiEvent event = { 0 };
-	event.type = CHIAKI_EVENT_RUMBLE;
-	event.rumble.left = amp;
-	event.rumble.right = amp;
-	android_chiaki_event_cb(&event, session); // reuse the existing rumble dispatch
+	// Smooth mode re-arms every ~90ms, so a short effect lets rumble stop soon after
+	// the haptic audio does; raw mode keeps the original 1s effect.
+	jint effect_ms = session->haptics_rumble.smooth ? CHIAKI_HAPTICS_RUMBLE_SMOOTH_EFFECT_MS : CLASSIC_RUMBLE_EFFECT_MS;
+	E->CallVoidMethod(env, session->java_session, session->java_session_event_rumble_meth,
+					  (jint)amp, (jint)amp, effect_ms);
+	(*global_vm)->DetachCurrentThread(global_vm);
 }
 
-JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject result, jobject connect_info_obj, jstring log_file_str, jboolean log_verbose, jobject java_session)
+JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject result, jobject connect_info_obj, jstring log_file_str, jboolean log_verbose, jboolean smooth_haptic_rumble, jboolean dualshock4_mode, jobject java_session)
 {
 	AndroidChiakiSession *session = NULL;
 	ChiakiLog *log = malloc(sizeof(ChiakiLog));
@@ -462,7 +450,10 @@ JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject 
 	// public API -- those events stay ignored), but the haptics sink registered below
 	// converts the haptic-audio PCM to one motor amplitude and re-emits it as a normal
 	// rumble event (same approach as Qt/iOS), so rumble works for both RP and Cloud.
-	connect_info.enable_dualsense = true;
+	// The "DualShock 4 mode" setting opts out (enable_dualsense=false): the console then
+	// treats the pad as a DS4, which per the above silences PS5 Remote Play rumble.
+	connect_info.enable_dualsense = !dualshock4_mode;
+	CHIAKI_LOGI(log, "JNI: enable_dualsense=%d, smooth_haptic_rumble=%d", !dualshock4_mode, (int)smooth_haptic_rumble);
 	connect_info.ps5 = ps5;
 
 	const char *str_borrow = E->GetStringUTFChars(env, host_string, NULL);
@@ -638,6 +629,7 @@ JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject 
 		goto beach;
 	}
 	memset(session, 0, sizeof(AndroidChiakiSession));
+	chiaki_haptics_rumble_init(&session->haptics_rumble, smooth_haptic_rumble);
 	session->log = log;
 	err = android_chiaki_video_decoder_init(&session->video_decoder, log, connect_info.video_profile.width, connect_info.video_profile.height,
 			connect_info.ps5 ? connect_info.video_profile.codec : CHIAKI_CODEC_H264);
@@ -711,7 +703,7 @@ JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject 
 	session->java_session_event_connected_meth = E->GetMethodID(env, session->java_session_class, "eventConnected", "()V");
 	session->java_session_event_login_pin_request_meth = E->GetMethodID(env, session->java_session_class, "eventLoginPinRequest", "(Z)V");
 	session->java_session_event_quit_meth = E->GetMethodID(env, session->java_session_class, "eventQuit", "(ILjava/lang/String;)V");
-	session->java_session_event_rumble_meth = E->GetMethodID(env, session->java_session_class, "eventRumble", "(II)V");
+	session->java_session_event_rumble_meth = E->GetMethodID(env, session->java_session_class, "eventRumble", "(III)V");
 	session->java_session_event_regist_meth = E->GetMethodID(env, session->java_session_class, "eventRegist", "(L"BASE_PACKAGE"/RegistHost;)V");
 	session->java_session_event_holepunch_meth = E->GetMethodID(env, session->java_session_class, "eventHolepunch", "()V");
 	session->java_session_event_ps_chord_meth = E->GetMethodID(env, session->java_session_class, "eventPsChord", "()V");

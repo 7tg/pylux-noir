@@ -134,6 +134,16 @@ class Preferences(context: Context)
 			.coerceIn(RUMBLE_INTENSITY_MIN, RUMBLE_INTENSITY_MAX)
 		set(value) { sharedPreferences.edit().putInt(rumbleIntensityKey, value.coerceIn(RUMBLE_INTENSITY_MIN, RUMBLE_INTENSITY_MAX)).apply() }
 
+	val smoothHapticRumbleKey get() = resources.getString(R.string.preferences_smooth_haptic_rumble_key)
+	var smoothHapticRumble // PS5 haptic audio -> rumble: filtered (true) or raw. Applied at stream start.
+		get() = sharedPreferences.getBoolean(smoothHapticRumbleKey, true)
+		set(value) { sharedPreferences.edit().putBoolean(smoothHapticRumbleKey, value).apply() }
+
+	val dualShock4ModeKey get() = resources.getString(R.string.preferences_dualshock4_mode_key)
+	var dualShock4Mode // declare a DualShock 4 instead of a DualSense (enable_dualsense=false)
+		get() = sharedPreferences.getBoolean(dualShock4ModeKey, false)
+		set(value) { sharedPreferences.edit().putBoolean(dualShock4ModeKey, value).apply() }
+
 	/** Where the motion data (gyro/accel/orientation) streamed to the console comes
 	 * from. Matches iOS' MotionSource setting. */
 	enum class MotionSource(val value: String)

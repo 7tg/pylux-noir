@@ -55,6 +55,21 @@
             app:showSeekBarValue="true"
             app:icon="@drawable/ic_rumble" />
 
+        <SwitchPreference
+            app:key="@string/preferences_smooth_haptic_rumble_key"
+            app:title="@string/preferences_smooth_haptic_rumble_title"
+            app:summary="@string/preferences_smooth_haptic_rumble_summary"
+            app:dependency="@string/preferences_rumble_enabled_key"
+            app:defaultValue="true"
+            app:icon="@drawable/ic_rumble" />
+
+        <SwitchPreference
+            app:key="@string/preferences_dualshock4_mode_key"
+            app:title="@string/preferences_dualshock4_mode_title"
+            app:summary="@string/preferences_dualshock4_mode_summary"
+            app:defaultValue="false"
+            app:icon="@drawable/ic_gamepad" />
+
         <ListPreference
             app:key="@string/preferences_motion_source_key"
             app:title="@string/preferences_motion_source_title"
