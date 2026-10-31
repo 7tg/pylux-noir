@@ -49,6 +49,8 @@ class ButtonView @JvmOverloads constructor(
 		}
 
 		isClickable = true
+		// Touch-only: a controller key press would otherwise focus it and draw the focus highlight over the stream.
+		isFocusable = false
 	}
 
 	override fun onDraw(canvas: Canvas)
