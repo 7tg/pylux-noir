@@ -596,11 +596,21 @@ class StreamInput(val context: Context, val preferences: Preferences)
 
 		val buttonMask: UInt = when(event.keyCode)
 		{
-			// dpad handled by MotionEvents
-			//KeyEvent.KEYCODE_DPAD_LEFT -> ControllerState.BUTTON_DPAD_LEFT
-			//KeyEvent.KEYCODE_DPAD_RIGHT -> ControllerState.BUTTON_DPAD_RIGHT
-			//KeyEvent.KEYCODE_DPAD_UP -> ControllerState.BUTTON_DPAD_UP
-			//KeyEvent.KEYCODE_DPAD_DOWN -> ControllerState.BUTTON_DPAD_DOWN
+			// Most pads report the dpad as HAT axes (MotionEvents), but some send keys
+			// (hid-nintendo: Switch Pro / 8BitDo in S mode). Hat motion is consumed in
+			// onGenericMotionEvent, so no synthetic dpad keys double up with it.
+			KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+			KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+				if(event.source and InputDevice.SOURCE_GAMEPAD != InputDevice.SOURCE_GAMEPAD)
+					return false
+				when(event.keyCode)
+				{
+					KeyEvent.KEYCODE_DPAD_LEFT -> ControllerState.BUTTON_DPAD_LEFT
+					KeyEvent.KEYCODE_DPAD_RIGHT -> ControllerState.BUTTON_DPAD_RIGHT
+					KeyEvent.KEYCODE_DPAD_UP -> ControllerState.BUTTON_DPAD_UP
+					else -> ControllerState.BUTTON_DPAD_DOWN
+				}
+			}
 			KeyEvent.KEYCODE_BUTTON_A -> if(swapCrossMoon) ControllerState.BUTTON_MOON else ControllerState.BUTTON_CROSS
 			KeyEvent.KEYCODE_BUTTON_B -> if(swapCrossMoon) ControllerState.BUTTON_CROSS else ControllerState.BUTTON_MOON
 			KeyEvent.KEYCODE_BUTTON_X -> if(swapCrossMoon) ControllerState.BUTTON_PYRAMID else ControllerState.BUTTON_BOX
