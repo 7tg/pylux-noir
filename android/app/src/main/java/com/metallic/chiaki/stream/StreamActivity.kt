@@ -238,6 +238,7 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 			// User-scalable strength (0..500%). Read once at stream start (restart to change);
 			// avoids reading SharedPreferences on every rumble event (~80/s).
 			val rumbleScale = Preferences(this).rumbleIntensity / 100f
+			val deviceFallback = Preferences(this).deviceVibrationFallback
 			var lastVibrator: Vibrator? = null
 			viewModel.session.rumbleState.observe(this, Observer {
 				// Prefer the connected controller's own motor over the phone's
@@ -245,7 +246,13 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 				// list is tiny and rumble events are sparse). L/R are averaged into
 				// one amplitude because both targets expose a single channel here.
 				val cv = controllerVibrator()
-				val vibrator = cv ?: phoneVibrator
+				val vibrator = cv ?: phoneVibrator.takeIf { deviceFallback }
+				if(vibrator == null)
+				{
+					lastVibrator?.cancel()
+					lastVibrator = null
+					return@Observer
+				}
 				val amplitude = (((it.left.toInt() + it.right.toInt()) / 2) * rumbleScale).toInt().coerceIn(0, 255)
 				// Cancel the PREVIOUS target too: when the target switches
 				// (controller connects/disconnects mid-rumble), cancelling only the

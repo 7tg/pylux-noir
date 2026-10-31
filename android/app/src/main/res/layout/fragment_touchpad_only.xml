@@ -17,8 +17,6 @@
         android:id="@+id/touchpadView"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:drawableIdle="@drawable/control_touchpad"
-        app:drawablePressed="@drawable/control_touchpad_pressed"
         app:layout_constraintDimensionRatio="1920:942"
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintRight_toRightOf="parent"

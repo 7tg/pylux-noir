@@ -139,6 +139,11 @@ class Preferences(context: Context)
 		get() = sharedPreferences.getBoolean(smoothHapticRumbleKey, true)
 		set(value) { sharedPreferences.edit().putBoolean(smoothHapticRumbleKey, value).apply() }
 
+	val deviceVibrationFallbackKey get() = resources.getString(R.string.preferences_device_vibration_fallback_key)
+	var deviceVibrationFallback // rumble on the device itself when no controller motor exists. Applied at stream start.
+		get() = sharedPreferences.getBoolean(deviceVibrationFallbackKey, true)
+		set(value) { sharedPreferences.edit().putBoolean(deviceVibrationFallbackKey, value).apply() }
+
 	val dualShock4ModeKey get() = resources.getString(R.string.preferences_dualshock4_mode_key)
 	var dualShock4Mode // declare a DualShock 4 instead of a DualSense (enable_dualsense=false)
 		get() = sharedPreferences.getBoolean(dualShock4ModeKey, false)
