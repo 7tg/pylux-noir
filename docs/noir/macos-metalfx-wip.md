@@ -17,11 +17,13 @@ Ctrl+U in stream). Frame generation dropped: the MacBook Air M2 panel is 60 Hz.
 ## Blocker (not caused by MetalFX)
 The app freezes before the first video frame: the render thread waits forever in
 `pl_swapchain_colorspace_hint` → `vkWaitForFences` (retired-swapchain present fences under
-MoltenVK + VK_EXT_swapchain_maintenance1). Same with MoltenVK 1.2.9 and 1.4.2. Last change
-(hint only when the colour space changes) was built but not tested.
+MoltenVK + VK_EXT_swapchain_maintenance1). Same with MoltenVK 1.2.9 and 1.4.2. Fix: call the
+hint only when the colour space changes — with it the app launches and the UI renders (render
+thread idle, 2026-11-02). Not yet tested with a stream (PS5 was fully off). The bundle on the Mac
+currently carries MoltenVK 1.4.2 copied in by hand; build-macos.sh still pins 1.2.9.
 
 ## Next
-1. Test the hint-on-change fix; otherwise avoid swapchain recreation before the first present.
+1. Start a stream (PS5 in rest mode or on; wake via raw WAKEUP packet) and confirm video shows.
 2. Once video shows: check the MetalFX log line (texture usage/storage), compare on/off with
    Ctrl+U, measure frame time.
 3. Mac setup: repo at `~/src/pylux-noir` on the MacBook (`barbarosgoren@192.168.31.32`),
