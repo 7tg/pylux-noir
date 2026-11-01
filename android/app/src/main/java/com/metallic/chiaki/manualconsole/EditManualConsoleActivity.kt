@@ -55,6 +55,7 @@ class EditManualConsoleActivity: AppCompatActivity(), RevealActivity
 
 		viewModel.existingHost?.observe(this, Observer {
 			binding.hostEditText.setText(it.host)
+			binding.fallbackHostEditText.setText(it.fallbackHost ?: "")
 		})
 
 		viewModel.selectedRegisteredHost.observe(this, Observer {
@@ -94,7 +95,7 @@ class EditManualConsoleActivity: AppCompatActivity(), RevealActivity
 		}
 
 		binding.saveButton.isEnabled = false
-		viewModel.saveHost(host)
+		viewModel.saveHost(host, binding.fallbackHostEditText.text.toString().trim().ifEmpty { null })
 			.observeOn(AndroidSchedulers.mainThread())
 			.subscribe {
 				finish()

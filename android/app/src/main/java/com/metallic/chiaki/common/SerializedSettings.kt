@@ -60,7 +60,8 @@ class SerializedRegisteredHost(
 @JsonClass(generateAdapter = true)
 class SerializedManualHost(
 	@Json(name = "host") val host: String,
-	@Json(name = "server_mac") val serverMac: MacAddress?
+	@Json(name = "server_mac") val serverMac: MacAddress?,
+	@Json(name = "fallback_host") val fallbackHost: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -82,7 +83,8 @@ data class SerializedSettings(
 						manualHost.host,
 						manualHost.registeredHost?.let { registeredHostId ->
 							registeredHosts.firstOrNull { it.id == registeredHostId }
-						}?.serverMac
+						}?.serverMac,
+						manualHost.fallbackHost
 					)
 				})
 		}
@@ -281,6 +283,7 @@ abstract class ImportDao
 			settings.manualHosts.map {
 				ManualHost(
 					host = it.host,
+					fallbackHost = it.fallbackHost,
 					registeredHost = idMacs.firstOrNull { regHost -> regHost.mac == it.serverMac }?.id
 				)
 		})

@@ -33,6 +33,11 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
+import com.metallic.chiaki.common.consoleAnswers
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.appcompat.app.AlertDialog
 
 class RemotePlayFragment : Fragment()
@@ -323,12 +328,25 @@ class RemotePlayFragment : Fragment()
 		val registeredHost = host.registeredHost
 		if(registeredHost != null)
 		{
-			fun connect() {
-				val connectInfo = ConnectInfo(host.isPS5, host.host, registeredHost.rpRegistKey, registeredHost.rpKey, Preferences(requireContext()).videoProfile)
+			fun connect(address: String = host.host) {
+				val connectInfo = ConnectInfo(host.isPS5, address, registeredHost.rpRegistKey, registeredHost.rpKey, Preferences(requireContext()).videoProfile)
 				Intent(requireContext(), StreamActivity::class.java).let {
 					it.putExtra(StreamActivity.EXTRA_CONNECT_INFO, connectInfo)
 					startActivity(it)
 				}
+			}
+
+			val fallback = (host as? ManualDisplayHost)?.manualHost?.fallbackHost
+			if(fallback != null)
+			{
+				viewLifecycleOwner.lifecycleScope.launch {
+					val address = withContext(Dispatchers.IO) {
+						if(consoleAnswers(host.host, host.isPS5)) host.host else fallback
+					}
+					Log.i(TAG, "Manual host ${host.host}: connecting via $address")
+					connect(address)
+				}
+				return
 			}
 
 			if(host is DiscoveredDisplayHost && host.discoveredHost.state == DiscoveryHost.State.STANDBY)

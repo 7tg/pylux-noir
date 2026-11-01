@@ -71,6 +71,8 @@
     <string name="action_add_manual_save">Save</string>
     <string name="hint_add_manual_regist_host">Registered Console</string>
     <string name="add_manual_regist_on_connect">Register on first Connection</string>
+    <string name="hint_fallback_host">Fallback Address (optional)</string>
+    <string name="helper_fallback_host">Used when the console doesn\'t answer at the address above, e.g. its Tailscale IP</string>
     <string name="preferences_category_title_support">Support</string>
     <string name="preferences_donate_title">Support Pylux</string>
     <string name="preferences_donate_summary">Donate to support development. Thank you for using Pylux.</string>

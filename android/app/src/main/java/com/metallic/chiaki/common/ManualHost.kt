@@ -19,7 +19,9 @@ import io.reactivex.Single
 data class ManualHost(
 	@PrimaryKey(autoGenerate = true) val id: Long = 0,
 	val host: String,
-	@ColumnInfo(name = "registered_host") val registeredHost: Long?
+	@ColumnInfo(name = "registered_host") val registeredHost: Long?,
+	/** Tried when [host] does not answer, e.g. the console's Tailscale IP when away from home. */
+	@ColumnInfo(name = "fallback_host") val fallbackHost: String? = null
 )
 
 data class ManualHostAndRegisteredHost(
@@ -37,6 +39,7 @@ interface ManualHostDao
 			manual_host.id as manual_host_id,
 			manual_host.host as manual_host_host,
 			manual_host.registered_host as manual_host_registered_host,
+			manual_host.fallback_host as manual_host_fallback_host,
 			registered_host.*
 		FROM manual_host LEFT OUTER JOIN registered_host ON manual_host.registered_host = registered_host.id WHERE manual_host.id = :id""")
 	fun getByIdWithRegisteredHost(id: Long): Single<ManualHostAndRegisteredHost>

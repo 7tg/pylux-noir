@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.metallic.chiaki.lib.Target
 
 @Database(
-	version = 2,
+	version = 3,
 	entities = [RegisteredHost::class, ManualHost::class])
 @TypeConverters(Converters::class)
 abstract class AppDatabase: RoomDatabase()
@@ -31,6 +31,14 @@ val MIGRATION_1_2 = object : Migration(1, 2)
 	}
 }
 
+val MIGRATION_2_3 = object : Migration(2, 3)
+{
+	override fun migrate(database: SupportSQLiteDatabase)
+	{
+		database.execSQL("ALTER TABLE manual_host ADD fallback_host TEXT")
+	}
+}
+
 private var database: AppDatabase? = null
 fun getDatabase(context: Context): AppDatabase
 {
@@ -41,7 +49,7 @@ fun getDatabase(context: Context): AppDatabase
 		context.applicationContext,
 		AppDatabase::class.java,
 		"chiaki")
-		.addMigrations(MIGRATION_1_2)
+		.addMigrations(MIGRATION_1_2, MIGRATION_2_3)
 		.build()
 	database = db
 	return db

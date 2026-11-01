@@ -46,15 +46,15 @@ class EditManualConsoleViewModel(val database: AppDatabase, manualHostId: Long?)
 
 	var selectedRegisteredHost = MutableLiveData<RegisteredHost?>(null)
 
-	fun saveHost(host: String) =
+	fun saveHost(host: String, fallbackHost: String?) =
 		database.manualHostDao()
 			.let {
 				val registeredHost = selectedRegisteredHost.value?.id
 				val existingHost = existingHost?.value
 				if(existingHost != null)
-					it.update(ManualHost(id = existingHost.id, host = host, registeredHost = registeredHost))
+					it.update(ManualHost(id = existingHost.id, host = host, registeredHost = registeredHost, fallbackHost = fallbackHost))
 				else
-					it.insert(ManualHost(host = host, registeredHost = registeredHost))
+					it.insert(ManualHost(host = host, registeredHost = registeredHost, fallbackHost = fallbackHost))
 			}
 			.subscribeOn(Schedulers.io())
 }
