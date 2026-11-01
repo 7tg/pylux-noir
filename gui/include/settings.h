@@ -287,6 +287,8 @@ class Settings : public QObject
 		bool GetAutomaticConnect() const         { return settings.value("settings/automatic_connect", false).toBool(); }
 		void SetAutomaticConnect(bool autoconnect)    { settings.setValue("settings/automatic_connect", autoconnect); }
 
+		bool GetMetalFxUpscaling() const	   { return settings.value("settings/metalfx_upscaling", false).toBool(); }
+		void SetMetalFxUpscaling(bool enabled) { settings.setValue("settings/metalfx_upscaling", enabled); }
 		bool GetFullscreenDoubleClickEnabled() const	   { return settings.value("settings/fullscreen_doubleclick", false).toBool(); }
 		void SetFullscreenDoubleClickEnabled(bool enabled) { settings.setValue("settings/fullscreen_doubleclick", enabled); }
 

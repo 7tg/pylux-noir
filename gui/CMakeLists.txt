@@ -105,7 +105,10 @@ if(APPLE)
 		src/macMicPermission.m
 		include/macWakeSleep.h
 		src/macWakeSleep.cpp
+		include/metalfxupscaler.h
+		src/metalfxupscaler.mm
 	)
+	set_source_files_properties(src/metalfxupscaler.mm PROPERTIES COMPILE_FLAGS -fobjc-arc)
 elseif(WIN32)
 	list(APPEND SOURCE_FILES
 		include/windowsWakeSleep.h
@@ -177,7 +180,7 @@ if(NOT CHIAKI_ENABLE_FFMPEG_DECODER)
 	message(FATAL_ERROR "Chiaki GUI requires CHIAKI_ENABLE_FFMPEG_DECODER=ON")
 endif()
 if(APPLE)
-	target_link_libraries(chiaki "-framework AVFoundation" "-framework IOKit")
+	target_link_libraries(chiaki "-framework AVFoundation" "-framework IOKit" "-framework Metal" "-framework MetalFX")
 endif()
 
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fanalyzer")

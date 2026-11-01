@@ -774,6 +774,27 @@ DialogView {
 
                     Label {
                         Layout.alignment: Qt.AlignRight
+                        text: qsTr("MetalFX Upscaling:")
+                        visible: Qt.platform.os === "osx"
+                    }
+
+                    C.CheckBox {
+                        visible: Qt.platform.os === "osx"
+                        checked: Chiaki.settings.metalFxUpscaling
+                        onToggled: {
+                            Chiaki.settings.metalFxUpscaling = checked;
+                            Chiaki.window.metalFxUpscaling = checked;
+                        }
+                    }
+
+                    Label {
+                        Layout.alignment: Qt.AlignRight
+                        text: qsTr("Apple's upscaler (Ctrl+U in stream)")
+                        visible: Qt.platform.os === "osx"
+                    }
+
+                    Label {
+                        Layout.alignment: Qt.AlignRight
                         text: qsTr("Custom Renderer Settings")
                         visible: Chiaki.window.videoPreset == ChiakiWindow.VideoPreset.Custom
                     }
