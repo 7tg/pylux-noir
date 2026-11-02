@@ -108,11 +108,12 @@ ManualHost::ManualHost()
 	registered = false;
 }
 
-ManualHost::ManualHost(int id, const QString &host, bool registered, const HostMAC &registered_mac)
+ManualHost::ManualHost(int id, const QString &host, bool registered, const HostMAC &registered_mac, const QString &fallback_host)
 	: id(id),
 	host(host),
 	registered(registered),
-	registered_mac(registered_mac)
+	registered_mac(registered_mac),
+	fallback_host(fallback_host)
 {
 }
 
@@ -120,7 +121,8 @@ ManualHost::ManualHost(int id, const ManualHost &o)
 	: id(id),
 	host(o.host),
 	registered(o.registered),
-	registered_mac(o.registered_mac)
+	registered_mac(o.registered_mac),
+	fallback_host(o.fallback_host)
 {
 }
 
@@ -136,6 +138,7 @@ void ManualHost::SaveToSettings(QSettings *settings) const
 	settings->setValue("host", host);
 	settings->setValue("registered", registered);
 	settings->setValue("registered_mac", QByteArray((const char *)registered_mac.GetMAC(), 6));
+	settings->setValue("fallback_host", fallback_host);
 }
 
 ManualHost ManualHost::LoadFromSettings(QSettings *settings)
@@ -144,6 +147,7 @@ ManualHost ManualHost::LoadFromSettings(QSettings *settings)
 	r.id = settings->value("id", -1).toInt();
 	r.host = settings->value("host").toString();
 	r.registered = settings->value("registered").toBool();
+	r.fallback_host = settings->value("fallback_host").toString();
 	auto registered_mac = settings->value("registered_mac").toByteArray();
 	if(registered_mac.size() == 6)
 		r.registered_mac = HostMAC((const uint8_t *)registered_mac.constData());

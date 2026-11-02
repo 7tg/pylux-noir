@@ -47,6 +47,9 @@
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QUdpSocket>
+#include <QHostInfo>
+#include <chiaki/discovery.h>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -1374,14 +1377,14 @@ void QmlBackend::setConsolePin(int index, QString console_pin)
     settings->AddRegisteredHost(server.registered_host);
 }
 
-void QmlBackend::addManualHost(int index, const QString &address)
+void QmlBackend::addManualHost(int index, const QString &address, const QString &fallback_address)
 {
     HostMAC hmac;
     QList<RegisteredHost> registered_hosts = settings->GetRegisteredHosts();
     bool registered = (index >= 0 && (index < registered_hosts.length()));
     if (registered)
         hmac = registered_hosts.at(index).GetServerMAC();
-    ManualHost host(-1, address, registered, hmac);
+    ManualHost host(-1, address, registered, hmac, fallback_address);
     settings->SetManualHost(host);
 }
 
@@ -1583,6 +1586,19 @@ void QmlBackend::setWebEngineHints(QQuickWebEngineProfile *profile)
 }
 #endif
 
+// One discovery SRCH to `host`; true if the console replies within `timeout_ms`.
+static bool consoleAnswers(const QString &host, bool ps5, int timeout_ms = 800)
+{
+    QHostInfo info = QHostInfo::fromName(host);
+    if (info.addresses().isEmpty())
+        return false;
+    QUdpSocket socket;
+    const QByteArray msg = QByteArray("SRCH * HTTP/1.1\ndevice-discovery-protocol-version:")
+        + (ps5 ? CHIAKI_DISCOVERY_PROTOCOL_VERSION_PS5 : CHIAKI_DISCOVERY_PROTOCOL_VERSION_PS4) + "\n";
+    socket.writeDatagram(msg, info.addresses().first(), ps5 ? CHIAKI_DISCOVERY_PORT_PS5 : CHIAKI_DISCOVERY_PORT_PS4);
+    return socket.waitForReadyRead(timeout_ms) && socket.hasPendingDatagrams();
+}
+
 void QmlBackend::connectToHost(int index, QString nickname, QString gameName, QString titleId)
 {
     window->setWindowAdjustable(false);
@@ -1642,6 +1658,13 @@ void QmlBackend::connectToHost(int index, QString nickname, QString gameName, QS
     if(server.duid.isEmpty())
     {
         QString host = server.GetHostAddr();
+        // Manual console with a fallback (e.g. Tailscale IP): use it when the primary address
+        // doesn't answer a discovery SRCH. Consoles answer in standby too.
+        const QString fallback = server.discovered ? QString() : server.manual_host.GetFallbackHost();
+        if (!fallback.isEmpty() && !consoleAnswers(host, server.IsPS5())) {
+            qCInfo(chiakiGui) << "Manual host" << host << "not answering, connecting via fallback" << fallback;
+            host = fallback;
+        }
         StreamSessionConnectInfo info(
                 settings,
                 server.registered_host.GetTarget(),

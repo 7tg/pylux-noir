@@ -12,7 +12,7 @@ DialogView {
     buttonText: qsTr("Add")
     buttonEnabled: hostField.text.trim() && (consoleCombo.model[consoleCombo.currentIndex].index != -1)
     onAccepted: {
-        Chiaki.addManualHost(consoleCombo.model[consoleCombo.currentIndex].index, hostField.text.trim());
+        Chiaki.addManualHost(consoleCombo.model[consoleCombo.currentIndex].index, hostField.text.trim(), fallbackField.text.trim());
         close();
     }
     
@@ -49,6 +49,18 @@ DialogView {
                 Layout.preferredWidth: 400
                 firstInFocusChain: true
                 KeyNavigation.up: headerButton
+            }
+
+            Label {
+                Layout.alignment: Qt.AlignRight
+                text: qsTr("Fallback Address:")
+            }
+
+            C.TextField {
+                id: fallbackField
+                echoMode: Chiaki.settings.streamerMode ? TextInput.Password : TextInput.Normal
+                Layout.preferredWidth: 400
+                placeholderText: qsTr("Optional, e.g. Tailscale IP; used when Host doesn't answer")
             }
 
             Label {

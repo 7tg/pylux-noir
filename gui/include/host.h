@@ -95,15 +95,17 @@ class ManualHost
 		QString host;
 		bool registered;
 		HostMAC registered_mac;
+		QString fallback_host; // tried when `host` doesn't answer, e.g. the console's Tailscale IP
 
 	public:
 		ManualHost();
-		ManualHost(int id, const QString &host, bool registered, const HostMAC &registered_mac);
+		ManualHost(int id, const QString &host, bool registered, const HostMAC &registered_mac, const QString &fallback_host = QString());
 		ManualHost(int id, const ManualHost &o);
 		void SetHost(const QString &hostadd);
 
 		int GetID() const 			{ return id; }
 		QString GetHost() const 	{ return host; }
+		QString GetFallbackHost() const	{ return fallback_host; }
 		bool GetRegistered() const	{ return registered; }
 		HostMAC GetMAC() const 		{ return registered_mac; }
 
@@ -112,7 +114,7 @@ class ManualHost
 		void SaveToSettings(QSettings *settings) const;
 		static ManualHost LoadFromSettings(QSettings *settings);
 };
-static bool operator==(const ManualHost &a, const ManualHost &b)	{ return (a.GetID() == b.GetID() && a.GetHost() == b.GetHost() && a.GetRegistered() == b.GetRegistered() && a.GetMAC() == b.GetMAC()); }
+static bool operator==(const ManualHost &a, const ManualHost &b)	{ return (a.GetID() == b.GetID() && a.GetHost() == b.GetHost() && a.GetFallbackHost() == b.GetFallbackHost() && a.GetRegistered() == b.GetRegistered() && a.GetMAC() == b.GetMAC()); }
 class PsnHost
 {
 	private:
