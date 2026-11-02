@@ -1054,7 +1054,14 @@ void QmlMainWindow::render()
     }
     // Only on change: with MoltenVK each hint waits on the swapchain's fences, and the
     // very first one (before any frame was presented) never returns.
-    if (!swapchain_hint_set || !pl_color_space_equal(&hint, &swapchain_hint)) {
+    bool want_hint = !swapchain_hint_set || !pl_color_space_equal(&hint, &swapchain_hint);
+#ifdef Q_OS_MACOS
+    // MoltenVK reports VK_COLOR_SPACE_PASS_THROUGH_EXT, where the hint only recreates the
+    // swapchain and then blocks on a retired swapchain's present fences, which never signal
+    // there. SDR gains nothing from it, so only hint for HDR.
+    want_hint = want_hint && pl_color_space_is_hdr(&hint);
+#endif
+    if (want_hint) {
         swapchain_hint = hint;
         swapchain_hint_set = true;
         pl_swapchain_colorspace_hint(placebo_swapchain, &hint);

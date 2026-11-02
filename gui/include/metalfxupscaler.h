@@ -14,7 +14,8 @@ struct MetalFxUpscaler;
 MetalFxUpscaler *metalfx_create(pl_vulkan vk);
 void metalfx_destroy(MetalFxUpscaler **upscaler);
 
-// Runs the scaler over the whole of `in` into the whole of `out`. Waits for the GPU on both
-// sides, so libplacebo's work on `in` is done before Metal reads it and Metal's write to
-// `out` is done before libplacebo samples it.
+// Runs the scaler over the whole of `in` into the whole of `out`. GPU-side ordering only: the
+// textures are held from libplacebo behind a timeline semaphore that Metal waits on, and
+// released back once Metal signals it. Never blocks the CPU (a pl_gpu_finish here deadlocked
+// on the pending swapchain frame under MoltenVK).
 bool metalfx_upscale(MetalFxUpscaler *upscaler, pl_tex in, pl_tex out);

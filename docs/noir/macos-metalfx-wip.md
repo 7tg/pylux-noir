@@ -14,17 +14,22 @@ Ctrl+U in stream). Frame generation dropped: the MacBook Air M2 panel is 60 Hz.
 - Builds on the MacBook Air M2 (macOS 27, CLT only) and launches; MoltenVK exposes
   `VK_EXT_metal_objects`.
 
-## Blocker (not caused by MetalFX)
-The app freezes before the first video frame: the render thread waits forever in
-`pl_swapchain_colorspace_hint` → `vkWaitForFences` (retired-swapchain present fences under
-MoltenVK + VK_EXT_swapchain_maintenance1). Same with MoltenVK 1.2.9 and 1.4.2. Fix: call the
-hint only when the colour space changes — with it the app launches and the UI renders (render
-thread idle, 2026-11-02). Not yet tested with a stream (PS5 was fully off). The bundle on the Mac
-currently carries MoltenVK 1.4.2 copied in by hand; build-macos.sh still pins 1.2.9.
+## Status (2026-11-02): working on the MacBook Air M2
+- Stream from the PS5 Pro (1080p) on the 3420x2214 Retina window: `renderMetalFx` →
+  `metalfx_upscale` in the render path every frame; PS5 home screen text visibly sharper than
+  libplacebo's default upscale, edge variance 283 vs 225, no colour shift.
+- Two freezes fixed on the way:
+  1. `pl_swapchain_colorspace_hint` blocked forever on MoltenVK (PASS_THROUGH colour space →
+     swapchain recreate → waits on never-signalled present fences). Now hinted only on change,
+     and on macOS only for HDR.
+  2. A CPU `pl_gpu_finish` before MetalFX deadlocked on the pending swapchain frame. Sync is now
+     GPU-only: `pl_vulkan_hold_ex` both textures behind a timeline semaphore exported as an
+     `MTLSharedEvent`, Metal waits/signals it, `pl_vulkan_release_ex` hands them back.
 
-## Next
-1. Start a stream (PS5 in rest mode or on; wake via raw WAKEUP packet) and confirm video shows.
-2. Once video shows: check the MetalFX log line (texture usage/storage), compare on/off with
-   Ctrl+U, measure frame time.
-3. Mac setup: repo at `~/src/pylux-noir` on the MacBook (`barbarosgoren@192.168.31.32`),
-   test config reuses chiaki-ng's PS5-709 registration.
+## Open
+- HDR untested (on macOS the colour-space hint is only used for HDR, which can still hit freeze 1).
+- The test bundle carries MoltenVK 1.4.2 copied in by hand; build-macos.sh pins 1.2.9 (untested
+  with these fixes).
+- One `stream ... --fullscreen` CLI run never opened a connection; plain `stream` runs were fine.
+- Mac setup: `~/src/pylux-noir` on the MacBook (`barbarosgoren@192.168.31.32`); test config reuses
+  chiaki-ng's PS5-709 registration; wake the PS5 with a raw WAKEUP packet first.
