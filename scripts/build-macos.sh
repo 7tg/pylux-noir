@@ -63,7 +63,7 @@ AD_HOC="false"
 SKIP_NOTARY_KEYCHAIN="false"
 NO_CREDENTIALS_FILE="false"
 ARCH=""
-MOLTENVK_VERSION="v1.2.9"
+MOLTENVK_VERSION="v1.4.2"
 STEAMWORKS="OFF"
 SKIP_DMG_NOTARIZE="false"
 MAC_APPSTORE="OFF"
@@ -346,7 +346,7 @@ deploy_app() {
         -libpath="$(brew --prefix)/lib"
     
     # Download and install MoltenVK (use v1.2.9 to match working GitHub Actions)
-    echo "Installing MoltenVK v1.2.9..."
+    echo "Installing MoltenVK ${MOLTENVK_VERSION}..."
     mkdir -p "$output_path/Contents/Resources/vulkan/icd.d"
     
     MOLTENVK_TAR="$BUILD_OUTPUT_DIR/MoltenVK-macos.tar"
