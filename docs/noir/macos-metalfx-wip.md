@@ -27,7 +27,10 @@ Ctrl+U in stream). Frame generation dropped: the MacBook Air M2 panel is 60 Hz.
      `MTLSharedEvent`, Metal waits/signals it, `pl_vulkan_release_ex` hands them back.
 
 ## Open
-- HDR untested (on macOS the colour-space hint is only used for HDR, which can still hit freeze 1).
+- HDR (h265_hdr) streams fine, no freeze, MetalFX runs on RGBA16F. On the MacBook Air's SDR panel
+  libplacebo tone-maps it visibly dimmer/greyer than the SDR stream, and it drops frames
+  (Ghost of Yotei menu: 17/s plain, 31/s with MetalFX, vs 3/s SDR+MetalFX; lat 35/45 vs 23 ms).
+  Use SDR on that Mac.
 - The test bundle carries MoltenVK 1.4.2 copied in by hand; build-macos.sh pins 1.2.9 (untested
   with these fixes).
 - One `stream ... --fullscreen` CLI run never opened a connection; plain `stream` runs were fine.
