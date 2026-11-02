@@ -26,6 +26,7 @@
 #include <QTimer>
 #if defined(Q_OS_MACOS)
 #include <objc/message.h>
+#include "metalfxupscaler.h"
 #endif
 
 Q_LOGGING_CATEGORY(chiakiGui, "chiaki.gui");
@@ -161,6 +162,12 @@ QmlMainWindow::~QmlMainWindow()
 
     for (auto tex : placebo_tex)
         pl_tex_destroy(placebo_vulkan->gpu, &tex);
+#ifdef Q_OS_MACOS
+    pl_tex_destroy(placebo_vulkan->gpu, &metalfx_in);
+    pl_tex_destroy(placebo_vulkan->gpu, &metalfx_out);
+    if (metalfx)
+        metalfx_destroy(&metalfx);
+#endif
 
     FILE *file = fopen(qPrintable(shader_cache_path()), "wb");
     if (file) {
@@ -279,6 +286,12 @@ void QmlMainWindow::setVideoPreset(VideoPreset preset)
     emit videoPresetChanged();
 }
 
+void QmlMainWindow::setMetalFxUpscaling(bool enabled)
+{
+    metalfx_upscaling = enabled;
+    emit metalFxUpscalingChanged();
+}
+
 void QmlMainWindow::setSettings(Settings *new_settings)
 {
     settings = new_settings;
@@ -367,6 +380,24 @@ AVBufferRef *QmlMainWindow::vulkanHwDeviceCtx()
     vkctx->nb_enabled_inst_extensions = placebo_vk_inst->num_extensions;
     vkctx->enabled_dev_extensions = placebo_vulkan->extensions;
     vkctx->nb_enabled_dev_extensions = placebo_vulkan->num_extensions;
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(59, 34, 100)
+    // FFmpeg 8 removed the per-purpose queue fields; describe the families in qf[].
+    auto add_qf = [vkctx](int idx, int num, VkQueueFlagBits flags, VkVideoCodecOperationFlagBitsKHR caps) {
+        for (int i = 0; i < vkctx->nb_qf; i++) {
+            if (vkctx->qf[i].idx == idx) {
+                vkctx->qf[i].flags = static_cast<VkQueueFlagBits>(vkctx->qf[i].flags | flags);
+                vkctx->qf[i].video_caps = static_cast<VkVideoCodecOperationFlagBitsKHR>(vkctx->qf[i].video_caps | caps);
+                return;
+            }
+        }
+        vkctx->qf[vkctx->nb_qf++] = { idx, num, flags, caps };
+    };
+    add_qf(placebo_vulkan->queue_graphics.index, placebo_vulkan->queue_graphics.count, VK_QUEUE_GRAPHICS_BIT, VkVideoCodecOperationFlagBitsKHR(0));
+    add_qf(placebo_vulkan->queue_transfer.index, placebo_vulkan->queue_transfer.count, VK_QUEUE_TRANSFER_BIT, VkVideoCodecOperationFlagBitsKHR(0));
+    add_qf(placebo_vulkan->queue_compute.index, placebo_vulkan->queue_compute.count, VK_QUEUE_COMPUTE_BIT, VkVideoCodecOperationFlagBitsKHR(0));
+    add_qf(vk_decode_queue_index, 1, VK_QUEUE_VIDEO_DECODE_BIT_KHR,
+        static_cast<VkVideoCodecOperationFlagBitsKHR>(VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR | VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR));
+#else
     vkctx->queue_family_index = placebo_vulkan->queue_graphics.index;
     vkctx->nb_graphics_queues = placebo_vulkan->queue_graphics.count;
     vkctx->queue_family_tx_index = placebo_vulkan->queue_transfer.index;
@@ -375,6 +406,7 @@ AVBufferRef *QmlMainWindow::vulkanHwDeviceCtx()
     vkctx->nb_comp_queues = placebo_vulkan->queue_compute.count;
     vkctx->queue_family_decode_index = vk_decode_queue_index;
     vkctx->nb_decode_queues = 1;
+#endif
     vkctx->lock_queue = [](struct AVHWDeviceContext *dev_ctx, uint32_t queue_family, uint32_t index) {
         auto vk = reinterpret_cast<pl_vulkan>(dev_ctx->user_opaque);
         vk->lock_queue(vk, queue_family, index);
@@ -459,6 +491,9 @@ void QmlMainWindow::init(Settings *settings, bool exit_app_on_stream_exit, Steam
         VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
         VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,
         VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME,
+#if defined(Q_OS_MACOS)
+        VK_EXT_METAL_OBJECTS_EXTENSION_NAME, // MetalFX upscaling
+#endif
     };
 
     struct pl_vulkan_params vulkan_params = {
@@ -468,7 +503,7 @@ void QmlMainWindow::init(Settings *settings, bool exit_app_on_stream_exit, Steam
         PL_VULKAN_DEFAULTS
         .extra_queues = VK_QUEUE_VIDEO_DECODE_BIT_KHR,
         .opt_extensions = opt_dev_extensions,
-        .num_opt_extensions = 4,
+        .num_opt_extensions = sizeof(opt_dev_extensions) / sizeof(opt_dev_extensions[0]),
     };
     placebo_vulkan = pl_vulkan_create(placebo_log, &vulkan_params);
 
@@ -651,6 +686,7 @@ void QmlMainWindow::init(Settings *settings, bool exit_app_on_stream_exit, Steam
         break;
     }
     setZoomFactor(settings->GetZoomFactor());
+    setMetalFxUpscaling(settings->GetMetalFxUpscaling());
 }
 
 void QmlMainWindow::normalTime()
@@ -1016,7 +1052,20 @@ void QmlMainWindow::render()
             hint.hdr.min_luma = hint.hdr.max_luma / (float)target_contrast;
             break;
     }
-    pl_swapchain_colorspace_hint(placebo_swapchain, &hint);
+    // Only on change: with MoltenVK each hint waits on the swapchain's fences, and the
+    // very first one (before any frame was presented) never returns.
+    bool want_hint = !swapchain_hint_set || !pl_color_space_equal(&hint, &swapchain_hint);
+#ifdef Q_OS_MACOS
+    // MoltenVK reports VK_COLOR_SPACE_PASS_THROUGH_EXT, where the hint only recreates the
+    // swapchain and then blocks on a retired swapchain's present fences, which never signal
+    // there. SDR gains nothing from it, so only hint for HDR.
+    want_hint = want_hint && pl_color_space_is_hdr(&hint);
+#endif
+    if (want_hint) {
+        swapchain_hint = hint;
+        swapchain_hint_set = true;
+        pl_swapchain_colorspace_hint(placebo_swapchain, &hint);
+    }
 
     struct pl_frame target_frame = {};
     pl_frame_from_swapchain(&target_frame, &sw_frame);
@@ -1134,11 +1183,27 @@ void QmlMainWindow::render()
         }
     }
 
+    bool rendered = false;
+#ifdef Q_OS_MACOS
+    if (metalfx_upscaling && current_frame.num_planes && video_mode != VideoMode::Zoom)
+        rendered = renderMetalFx(&target_frame, render_params);
+#endif
+    if (!rendered && !renderVideo(&target_frame, render_params))
+        qCWarning(chiakiGui) << "Failed to render Placebo frame!";
+
+    if (!pl_swapchain_submit_frame(placebo_swapchain))
+        qCWarning(chiakiGui) << "Failed to submit Placebo frame!";
+
+    pl_swapchain_swap_buffers(placebo_swapchain);
+}
+
+bool QmlMainWindow::renderVideo(pl_frame *target, const pl_render_params *render_params)
+{
     if (current_frame.num_planes && previous_frame.num_planes) {
         const struct pl_frame *frames[] = { &previous_frame, &current_frame, };
         const uint64_t sig = QDateTime::currentMSecsSinceEpoch();
         const uint64_t signatures[] = { sig, sig + 1 };
-        const float timestamps[] = { -0.5, 0.5 };
+        std::remove_pointer_t<decltype(pl_frame_mix::timestamps)> timestamps[] = { -0.5, 0.5 };
         struct pl_frame_mix frame_mix = {
             .num_frames = 2,
             .frames = frames,
@@ -1148,18 +1213,87 @@ void QmlMainWindow::render()
         };
         struct pl_render_params params = *render_params;
         params.frame_mixer = pl_find_filter_config("linear", PL_FILTER_FRAME_MIXING);
-        if (!pl_render_image_mix(placebo_renderer, &frame_mix, &target_frame, &params))
-            qCWarning(chiakiGui) << "Failed to render Placebo frame!";
-    } else {
-        if (!pl_render_image(placebo_renderer, current_frame.num_planes ? &current_frame : nullptr, &target_frame, render_params))
-            qCWarning(chiakiGui) << "Failed to render Placebo frame!";
+        return pl_render_image_mix(placebo_renderer, &frame_mix, target, &params);
     }
-
-    if (!pl_swapchain_submit_frame(placebo_swapchain))
-        qCWarning(chiakiGui) << "Failed to submit Placebo frame!";
-
-    pl_swapchain_swap_buffers(placebo_swapchain);
+    return pl_render_image(placebo_renderer, current_frame.num_planes ? &current_frame : nullptr, target, render_params);
 }
+
+#ifdef Q_OS_MACOS
+// Stream -> RGB at the stream's own size (libplacebo: chroma, debanding, frame mixing, no
+// scaling, no colour mapping), MetalFX up to the on-screen video rect, then a 1:1 pass onto
+// the swapchain for colour mapping and the UI overlay. False = caller renders normally.
+bool QmlMainWindow::renderMetalFx(pl_frame *target, const pl_render_params *render_params)
+{
+    if (!metalfx_tried) {
+        metalfx_tried = true;
+        metalfx = metalfx_create(placebo_vulkan);
+    }
+    if (!metalfx)
+        return false;
+
+    pl_gpu gpu = placebo_vulkan->gpu;
+    pl_rect2df src = current_frame.crop;
+    if (!pl_rect_w(src) || !pl_rect_h(src))
+        src = { 0, 0, (float)current_frame.planes[0].texture->params.w, (float)current_frame.planes[0].texture->params.h };
+    pl_rect2df dst = target->crop;
+    if (!pl_rect_w(dst) || !pl_rect_h(dst))
+        dst = { 0, 0, (float)swapchain_size.width(), (float)swapchain_size.height() };
+    dst = { roundf(dst.x0), roundf(dst.y0), roundf(dst.x1), roundf(dst.y1) };
+
+    const int in_w = (int)lroundf(fabsf(pl_rect_w(src))), in_h = (int)lroundf(fabsf(pl_rect_h(src)));
+    const int out_w = (int)fabsf(pl_rect_w(dst)), out_h = (int)fabsf(pl_rect_h(dst));
+    if (out_w <= in_w || out_h <= in_h)
+        return false; // window not larger than the stream: nothing to upscale
+
+    const bool hdr = pl_color_space_is_hdr(&current_frame.color);
+    const pl_fmt_caps caps = (pl_fmt_caps)(PL_FMT_CAP_SAMPLEABLE | PL_FMT_CAP_RENDERABLE | PL_FMT_CAP_STORABLE);
+    pl_fmt fmt = hdr ? pl_find_fmt(gpu, PL_FMT_FLOAT, 4, 16, 0, caps) : pl_find_fmt(gpu, PL_FMT_UNORM, 4, 8, 0, caps);
+    if (!fmt)
+        return false;
+
+    pl_tex_params tex_params = {};
+    tex_params.format = fmt;
+    tex_params.sampleable = true;
+    tex_params.renderable = true;
+    tex_params.storable = true;
+    tex_params.w = in_w;
+    tex_params.h = in_h;
+    if (!pl_tex_recreate(gpu, &metalfx_in, &tex_params))
+        return false;
+    tex_params.w = out_w;
+    tex_params.h = out_h;
+    if (!pl_tex_recreate(gpu, &metalfx_out, &tex_params))
+        return false;
+
+    pl_frame mid = {};
+    mid.num_planes = 1;
+    mid.planes[0].texture = metalfx_in;
+    mid.planes[0].components = 4;
+    for (int i = 0; i < 4; i++)
+        mid.planes[0].component_mapping[i] = i;
+    mid.repr = pl_color_repr_rgb;
+    mid.color = current_frame.color;
+    pl_color_space_infer(&mid.color);
+    mid.crop = { 0, 0, (float)in_w, (float)in_h };
+
+    // Same colour space as the source, so libplacebo does no colour mapping here.
+    if (!renderVideo(&mid, render_params))
+        return false;
+
+    if (!metalfx_upscale(metalfx, metalfx_in, metalfx_out))
+        return false;
+
+    pl_frame up = mid;
+    up.planes[0].texture = metalfx_out;
+    up.crop = { 0, 0, (float)out_w, (float)out_h };
+    pl_frame final_target = *target;
+    final_target.crop = dst;
+    pl_render_params final_params = *render_params;
+    final_params.deband_params = nullptr;
+    final_params.frame_mixer = nullptr;
+    return pl_render_image(placebo_renderer, &up, &final_target, &final_params);
+}
+#endif
 
 bool QmlMainWindow::handleShortcut(QKeyEvent *event)
 {
@@ -1192,6 +1326,13 @@ bool QmlMainWindow::handleShortcut(QKeyEvent *event)
         if (session)
             session->ToggleMute();
         return true;
+#ifdef Q_OS_MACOS
+    case Qt::Key_U:
+        setMetalFxUpscaling(!metalFxUpscaling());
+        settings->SetMetalFxUpscaling(metalFxUpscaling());
+        qCInfo(chiakiGui) << "MetalFX upscaling" << (metalFxUpscaling() ? "on" : "off");
+        return true;
+#endif
     case Qt::Key_O:
         emit menuRequested();
         return true;

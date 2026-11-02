@@ -46,6 +46,7 @@ class QmlMainWindow : public QWindow
     Q_PROPERTY(float ZoomFactor READ zoomFactor WRITE setZoomFactor NOTIFY zoomFactorChanged)
     Q_PROPERTY(VideoPreset videoPreset READ videoPreset WRITE setVideoPreset NOTIFY videoPresetChanged)
     Q_PROPERTY(bool directStream READ directStream NOTIFY directStreamChanged)
+    Q_PROPERTY(bool metalFxUpscaling READ metalFxUpscaling WRITE setMetalFxUpscaling NOTIFY metalFxUpscalingChanged)
 
 public:
     enum class VideoMode {
@@ -98,6 +99,9 @@ public:
     VideoPreset videoPreset() const;
     void setVideoPreset(VideoPreset mode);
 
+    bool metalFxUpscaling() const { return metalfx_upscaling; }
+    void setMetalFxUpscaling(bool enabled);
+
     Q_INVOKABLE void grabInput();
     Q_INVOKABLE void releaseInput();
 
@@ -115,6 +119,7 @@ signals:
     void videoModeChanged();
     void zoomFactorChanged();
     void videoPresetChanged();
+    void metalFxUpscalingChanged();
     void menuRequested();
     void directStreamChanged();
 
@@ -170,6 +175,18 @@ private:
     pl_frame current_frame = {};
     pl_frame previous_frame = {};
     std::atomic<bool> render_scheduled = {false};
+
+    std::atomic<bool> metalfx_upscaling = {false};
+    pl_color_space swapchain_hint = {};
+    bool swapchain_hint_set = false;
+#ifdef Q_OS_MACOS
+    struct MetalFxUpscaler *metalfx = nullptr;
+    bool metalfx_tried = false;
+    pl_tex metalfx_in = {};
+    pl_tex metalfx_out = {};
+    bool renderMetalFx(pl_frame *target, const pl_render_params *params);
+#endif
+    bool renderVideo(pl_frame *target, const pl_render_params *params);
 
     QVulkanInstance *qt_vk_inst = {};
     QQmlEngine *qml_engine = {};

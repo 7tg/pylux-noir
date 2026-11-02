@@ -374,6 +374,17 @@ void QmlSettings::setVerticalDeck(bool vertical)
 }
 #endif
 
+bool QmlSettings::metalFxUpscaling() const
+{
+    return settings->GetMetalFxUpscaling();
+}
+
+void QmlSettings::setMetalFxUpscaling(bool enabled)
+{
+    settings->SetMetalFxUpscaling(enabled);
+    emit metalFxUpscalingChanged();
+}
+
 bool QmlSettings::fullscreenDoubleClick() const
 {
     return settings->GetFullscreenDoubleClickEnabled();
@@ -1984,6 +1995,7 @@ void QmlSettings::refreshAllKeys()
     emit displayTargetPrimChanged();
     emit displayTargetTrcChanged();
     emit fullscreenDoubleClickChanged();
+    emit metalFxUpscalingChanged();
     emit fpsLocalPS4Changed();
     emit fpsRemotePS4Changed();
     emit fpsLocalPS5Changed();
