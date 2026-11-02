@@ -840,6 +840,55 @@ void StreamSession::HandleMouseMoveEvent(QMouseEvent *event, qreal width, qreal 
 	SendFeedbackState();
 }
 
+// Two-finger trackpad swipe = finger on the DualShock/DualSense touchpad, no click needed.
+// The touch starts under the pointer (same mapping as the mouse gesture) and follows the
+// fingers; lifting them ends it. Momentum scrolling after the lift is swallowed. Mouse wheels
+// (no scroll phase) are not ours.
+bool StreamSession::HandleWheelEvent(QWheelEvent *event, qreal width, qreal height)
+{
+	if(!mouse_touch_enabled || event->phase() == Qt::NoScrollPhase)
+		return false;
+	switch(event->phase())
+	{
+		case Qt::ScrollBegin:
+		{
+			// macOS sends each phase event twice (the copy has zero delta); keep the touch.
+			if(wheel_touch_id >= 0)
+				return true;
+			wheel_touch_x = std::clamp(event->position().x(), 0.0, width) * (PS_TOUCHPAD_MAX_X / width);
+			wheel_touch_y = std::clamp(event->position().y(), 0.0, height) * (PS_TOUCHPAD_MAX_Y / height);
+			wheel_touch_id = chiaki_controller_state_start_touch(&keyboard_state, (uint16_t)wheel_touch_x, (uint16_t)wheel_touch_y);
+			break;
+		}
+		case Qt::ScrollUpdate:
+		{
+			if(wheel_touch_id < 0)
+				return true;
+			// Qt's sign is "wheel top away from the hand" positive, flipped under natural
+			// scrolling; undo both so the touch moves the way the fingers do.
+			QPointF d = event->pixelDelta().isNull() ? QPointF(event->angleDelta()) / 8.0 : QPointF(event->pixelDelta());
+			if(!event->inverted())
+				d = -d;
+			const float gain = 2.0f; // one trackpad swipe ~ half the touchpad
+			wheel_touch_x = std::clamp(wheel_touch_x + (float)(d.x() * gain * PS_TOUCHPAD_MAX_X / width), 0.0f, PS_TOUCHPAD_MAX_X - 1);
+			wheel_touch_y = std::clamp(wheel_touch_y + (float)(d.y() * gain * PS_TOUCHPAD_MAX_Y / height), 0.0f, PS_TOUCHPAD_MAX_Y - 1);
+			chiaki_controller_state_set_touch_pos(&keyboard_state, (uint8_t)wheel_touch_id, (uint16_t)wheel_touch_x, (uint16_t)wheel_touch_y);
+			break;
+		}
+		case Qt::ScrollEnd:
+			if(wheel_touch_id >= 0)
+			{
+				chiaki_controller_state_stop_touch(&keyboard_state, (uint8_t)wheel_touch_id);
+				wheel_touch_id = -1;
+			}
+			break;
+		default: // Qt::ScrollMomentum
+			return true;
+	}
+	SendFeedbackState();
+	return true;
+}
+
 void StreamSession::HandleKeyboardEvent(QKeyEvent *event)
 {
 	if(!keyboard_controller_enabled)

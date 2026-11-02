@@ -1466,6 +1466,8 @@ bool QmlMainWindow::event(QEvent *event)
         QGuiApplication::sendEvent(quick_window, event);
         break;
     case QEvent::Wheel:
+        if (session && !grab_input && session->HandleWheelEvent(static_cast<QWheelEvent*>(event), width(), height()))
+            return true;
         QGuiApplication::sendEvent(quick_window, event);
         break;
     case QEvent::Close:

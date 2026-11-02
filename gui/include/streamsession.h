@@ -240,6 +240,8 @@ class StreamSession : public QObject
 		ChiakiControllerState touch_state;
 		QMap<int, uint8_t> touch_tracker;
 		int8_t mouse_touch_id;
+		int8_t wheel_touch_id = -1;
+		float wheel_touch_x = 0, wheel_touch_y = 0;
 		ChiakiControllerState dpad_touch_state;
 		uint16_t dpad_touch_increment;
 		float trigger_override;
@@ -396,6 +398,7 @@ class StreamSession : public QObject
 		void HandleMouseReleaseEvent(QMouseEvent *event);
 		void HandleMousePressEvent(QMouseEvent *event);
 		void HandleMouseMoveEvent(QMouseEvent *event, qreal width, qreal height);
+		bool HandleWheelEvent(QWheelEvent *event, qreal width, qreal height);
 		void ReadMic(const QByteArray &micdata);
 
 		void BlockInput(bool block) { input_block = block ? 1 : 2; SendFeedbackState(); }
