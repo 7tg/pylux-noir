@@ -41,6 +41,7 @@ class QmlMainWindow : public QWindow
     Q_OBJECT
     Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY hasVideoChanged)
     Q_PROPERTY(int droppedFrames READ droppedFrames NOTIFY droppedFramesChanged)
+    Q_PROPERTY(QString videoInfo READ videoInfo NOTIFY videoInfoChanged)
     Q_PROPERTY(bool keepVideo READ keepVideo WRITE setKeepVideo NOTIFY keepVideoChanged)
     Q_PROPERTY(VideoMode videoMode READ videoMode WRITE setVideoMode NOTIFY videoModeChanged)
     Q_PROPERTY(float ZoomFactor READ zoomFactor WRITE setZoomFactor NOTIFY zoomFactorChanged)
@@ -73,6 +74,7 @@ public:
 
     bool hasVideo() const;
     int droppedFrames() const;
+    QString videoInfo() const { return video_info; }
 
     bool directStream() const;
 
@@ -115,6 +117,7 @@ public:
 signals:
     void hasVideoChanged();
     void droppedFramesChanged();
+    void videoInfoChanged();
     void keepVideoChanged();
     void videoModeChanged();
     void zoomFactorChanged();
@@ -149,6 +152,17 @@ private:
     bool is_window_adjustable = false;
     bool is_stream_window_adjustable = false;
     int dropped_frames_current = 0;
+
+    // Stats line ("1920×1080 → 2880×1620 • MetalFX • 60 Hz • lat 9 ms"): written by the render
+    // thread, formatted once a second on the GUI thread.
+    QString video_info;
+    qint64 av_frame_arrival_ns = 0;     // presentFrame() time of av_frame (frame_mutex)
+    qint64 current_frame_arrival_ns = 0; // render thread
+    std::atomic<int> stat_in_w = {0}, stat_in_h = {0}, stat_out_w = {0}, stat_out_h = {0};
+    std::atomic<bool> stat_metalfx = {false}, stat_hdr = {false};
+    std::atomic<qint64> stat_lat_sum_us = {0};
+    std::atomic<int> stat_lat_count = {0};
+    void updateVideoInfo();
     bool going_full = false;
     VideoMode video_mode = VideoMode::Normal;
     float zoom_factor = 0;

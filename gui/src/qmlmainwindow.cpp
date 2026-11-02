@@ -24,6 +24,8 @@
 #include <QQuickRenderControl>
 #include <QQuickGraphicsDevice>
 #include <QTimer>
+#include <QScreen>
+#include <chrono>
 #if defined(Q_OS_MACOS)
 #include <objc/message.h>
 #include "metalfxupscaler.h"
@@ -348,6 +350,8 @@ void QmlMainWindow::presentFrame(AVFrame *frame, int32_t frames_lost)
         av_frame_free(&av_frame);
     }
     av_frame = frame;
+    av_frame_arrival_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
     frame_mutex.unlock();
 
     dropped_frames_current += frames_lost;
@@ -663,6 +667,7 @@ void QmlMainWindow::init(Settings *settings, bool exit_app_on_stream_exit, Steam
             emit droppedFramesChanged();
         }
         dropped_frames_current = 0;
+        updateVideoInfo();
     });
 
     this->renderparams_opts = pl_options_alloc(this->placebo_log);
@@ -983,6 +988,8 @@ void QmlMainWindow::render()
         }
         pl_unmap_avframe(placebo_vulkan->gpu, &current_frame);
         std::swap(frame, av_frame);
+        if (frame)
+            current_frame_arrival_ns = av_frame_arrival_ns;
     }
     frame_mutex.unlock();
 
@@ -1188,13 +1195,70 @@ void QmlMainWindow::render()
     if (metalfx_upscaling && current_frame.num_planes && video_mode != VideoMode::Zoom)
         rendered = renderMetalFx(&target_frame, render_params);
 #endif
+    stat_metalfx = rendered;
     if (!rendered && !renderVideo(&target_frame, render_params))
         qCWarning(chiakiGui) << "Failed to render Placebo frame!";
+
+    if (current_frame.num_planes) {
+        const pl_rect2df &src = current_frame.crop;
+        const bool src_set = pl_rect_w(src) && pl_rect_h(src);
+        stat_in_w = src_set ? (int)fabsf(pl_rect_w(src)) : current_frame.planes[0].texture->params.w;
+        stat_in_h = src_set ? (int)fabsf(pl_rect_h(src)) : current_frame.planes[0].texture->params.h;
+        const pl_rect2df &dst = target_frame.crop;
+        const bool dst_set = pl_rect_w(dst) && pl_rect_h(dst);
+        stat_out_w = dst_set ? (int)lroundf(fabsf(pl_rect_w(dst))) : swapchain_size.width();
+        stat_out_h = dst_set ? (int)lroundf(fabsf(pl_rect_h(dst))) : swapchain_size.height();
+        stat_hdr = pl_color_space_is_hdr(&current_frame.color);
+    }
 
     if (!pl_swapchain_submit_frame(placebo_swapchain))
         qCWarning(chiakiGui) << "Failed to submit Placebo frame!";
 
     pl_swapchain_swap_buffers(placebo_swapchain);
+
+    // Decoder output -> swap: how long a new frame waited for the screen.
+    if (current_frame_arrival_ns) {
+        const qint64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        stat_lat_sum_us += (now - current_frame_arrival_ns) / 1000;
+        stat_lat_count++;
+        current_frame_arrival_ns = 0;
+    }
+}
+
+void QmlMainWindow::updateVideoInfo()
+{
+    QString info;
+    if (has_video && stat_in_w > 0) {
+        QString upscaler;
+        if (stat_metalfx)
+            upscaler = QStringLiteral("MetalFX");
+        else if (stat_out_w > stat_in_w || stat_out_h > stat_in_h) {
+            switch (video_preset) {
+            case VideoPreset::Fast: upscaler = QStringLiteral("Bilinear"); break;
+            case VideoPreset::Default: upscaler = QStringLiteral("Spline36"); break;
+            case VideoPreset::HighQuality: upscaler = QStringLiteral("EWA Lanczos Sharp"); break;
+            case VideoPreset::Custom: upscaler = QStringLiteral("Custom"); break;
+            }
+        } else
+            upscaler = QStringLiteral("native");
+        QStringList parts;
+        parts << QStringLiteral("%1×%2 → %3×%4").arg(stat_in_w.load()).arg(stat_in_h.load()).arg(stat_out_w.load()).arg(stat_out_h.load());
+        parts << upscaler;
+        if (QScreen *s = screen())
+            parts << QStringLiteral("%1 Hz").arg(qRound(s->refreshRate()));
+        if (stat_hdr)
+            parts << QStringLiteral("HDR");
+        const int n = stat_lat_count.exchange(0);
+        const qint64 sum = stat_lat_sum_us.exchange(0);
+        if (n)
+            parts << QStringLiteral("lat %1 ms").arg(qRound(sum / 1000.0 / n));
+        info = parts.join(QStringLiteral(" • "));
+    }
+    if (info != video_info) {
+        video_info = info;
+        emit videoInfoChanged();
+    }
 }
 
 bool QmlMainWindow::renderVideo(pl_frame *target, const pl_render_params *render_params)
