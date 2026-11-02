@@ -346,19 +346,6 @@ Item {
         anchors.fill: parent
         visible: Chiaki.settings.showStreamStats && !menuView.visible && !sessionLoading && !sessionError && !(Chiaki.settings.audioVideoDisabled & 0x02)
 
-        // Video pipeline line at the top, like the Android overlay:
-        // "1920×1080 → 2880×1620 • MetalFX • 60 Hz • lat 9 ms"
-        Label {
-            anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 8 }
-            visible: Chiaki.window.videoInfo !== ""
-            text: Chiaki.window.videoInfo
-            font.pixelSize: 15
-            padding: 6
-            leftPadding: 12
-            rightPadding: 12
-            background: Rectangle { color: "#99000000"; radius: 6 }
-        }
-
         // Single bottom-right anchored column that grows UPWARD, so adding rows can
         // never push the stats off the bottom of the screen.
         ColumnLayout {
@@ -369,6 +356,19 @@ Item {
                 bottomMargin: 30
             }
             spacing: 2
+
+            // Video pipeline, like the Android overlay: resolution, upscaler, refresh rate,
+            // HDR, latency ("1920×1080 → 2880×1620 • MetalFX • 60 Hz • lat 9 ms").
+            Repeater {
+                model: Chiaki.window.videoInfo === "" ? [] : Chiaki.window.videoInfo.split(" • ")
+                Label {
+                    Layout.alignment: Qt.AlignRight
+                    text: modelData
+                    color: Material.accent
+                    font.bold: true
+                    font.pixelSize: 15
+                }
+            }
 
             Label {
                 Layout.alignment: Qt.AlignRight
